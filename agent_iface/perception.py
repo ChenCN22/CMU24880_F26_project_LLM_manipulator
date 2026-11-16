@@ -4,17 +4,27 @@ The simulator still knows the truth and scoring still uses only the truth.  What
 changes is that the agent's camera can be wrong about the goals of the task.
 
 Errors are defined against the truth, so their rates mean what they say:
-  false success   a goal that is not met is reported as met        (p_fs, default 0.30)
-  false failure   a goal that is met is reported as unmet          (p_ff, default 0.10)
+  false success   a goal that is not met is reported as met
+  false failure   a goal that is met is reported as unmet
                   -- as a wrong relation, or by not detecting the block at all
 False success is the commoner error on purpose: it is the direction real success
 detectors err in, and the one that makes an agent stop early.
+A block that is in the gripper is never misreported: what the hand holds is known
+from the fingers, not from a camera.
 
 Modes
   none        the camera is always right
-  transient   every look draws its errors independently; looking again usually helps
-  persistent  errors are a function of (camera view, true scene): the same view
-              repeats them exactly, another view draws afresh
+  transient   every look draws its errors independently, the same for every view
+              (false success 0.30, false failure 0.10); looking again usually helps
+  persistent  each goal has ONE badly placed camera -- think of an occluded line of
+              sight -- that is wrong about it most of the time (0.90 / 0.30), while the other
+              two are nearly always right (0.05 / 0.02).  Which camera is the bad
+              one differs per goal and per episode.  Errors are a function of
+              (camera view, true scene): the same view repeats them exactly, so
+              looking again from the same place does not help; another view does.
+              A single look from a random view is wrong about as often as in
+              transient mode (0.33 against 0.30), but a majority over the three views
+              is not (0.09 against 0.22).
   random      control: an arbitrary block's zone is misreported with probability p,
               independently per look -- noise unrelated to the task
 """
@@ -42,7 +52,8 @@ def _report(g: Dict[str, Any]) -> str:
 
 class PerceptionModel:
     def __init__(self, spec: Dict[str, Any], seed: int, mode: str = "none",
-                 p_fs: float = 0.30, p_ff: float = 0.10, p: float = 0.25) -> None:
+                 p_fs: float = 0.30, p_ff: float = 0.10, p: float = 0.25,
+                 bad: Tuple[float, float] = (0.90, 0.30), good: Tuple[float, float] = (0.05, 0.02)) -> None:
         if mode not in MODES:
             raise ValueError(f"perception mode must be one of {MODES}")
         self.spec, self.seed, self.mode, self.p = spec, seed, mode, p
@@ -53,6 +64,16 @@ class PerceptionModel:
         for g in self.goals:
             objs += [g["obj"]] if g["type"] == "in_zone" else [g["top"], g["bottom"]]
         self.goal_objs = list(dict.fromkeys(objs))
+        self.bad, self.good = tuple(bad), tuple(good)
+        # persistent mode: the one camera that sees goal i badly in this episode
+        self.bad_view = [VIEWS[zlib.crc32(f"{seed}|bad camera|{i}".encode()) % len(VIEWS)]
+                         for i in range(len(self.goals))]
+
+    def rates(self, i: int, view: str) -> Tuple[float, float]:
+        """(P(shown met | unmet), P(shown unmet | met)) for goal i seen from `view`."""
+        if self.mode == "persistent":
+            return self.bad if view == self.bad_view[i] else self.good
+        return self.p_fs, self.p_ff
 
     # ------------------------------------------------------------- candidates
     @staticmethod
@@ -97,10 +118,10 @@ class PerceptionModel:
                  ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
         """Return (what this camera reports, the fault that was injected or None).
 
-        Errors are conditioned on the truth, goal by goal:
-          a goal that is NOT met is shown as met with probability p_fs
-          a goal that IS met is shown as unmet with probability p_ff -- half the
-          time as a wrong relation, half the time by not detecting the block
+        Errors are conditioned on the truth, goal by goal, at the rates given by
+        rates(): a goal that is NOT met is shown as met; a goal that IS met is
+        shown as unmet -- half the time as a wrong relation, half the time by not
+        detecting the block.
         """
         if self.mode == "none":
             return graph, None
@@ -118,16 +139,19 @@ class PerceptionModel:
             made[1].update(view=view, mode=self.mode)
             return made
         out, errors = copy.deepcopy(graph), []
-        for g in self.goals:
+        for i, g in enumerate(self.goals):
             u, how = rng.random(), rng.random()            # always drawn, so the stream is stable
             objs = [g["obj"]] if g["type"] == "in_zone" else [g["top"], g["bottom"]]
             if any(o not in out["in_zone"] for o in objs):  # off the table or already hidden
                 continue
+            if graph.get("held") in objs:                   # in the hand: not a camera's call
+                continue
+            p_fs, p_ff = self.rates(i, view)
             met = self._met(g, graph)
-            if not met and u < self.p_fs:
+            if not met and u < p_fs:
                 self._set(out, g, True)
                 errors.append({"goal": g, "direction": "false_success", "type": "flip"})
-            elif met and u < self.p_ff:
+            elif met and u < p_ff:
                 if how < 0.5:
                     self._set(out, g, False)
                     errors.append({"goal": g, "direction": "false_failure", "type": "flip"})

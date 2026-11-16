@@ -21,8 +21,8 @@ from .critic import warning
 from .perception import VIEWS
 
 INFO_LEVELS = ("none", "label", "monitor")
-RELIABILITY_LABEL = ("camera reports are wrong about 1 time in 4. An error from one view can repeat "
-                     "every time that view is used; the other views fail independently.")
+RELIABILITY_LABEL = ("camera reports are sometimes wrong. Reports of the same thing from two different "
+                     "cameras are independent checks; asking the same camera again may just repeat its error.")
 
 TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {

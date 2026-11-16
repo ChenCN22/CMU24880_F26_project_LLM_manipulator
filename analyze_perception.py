@@ -96,6 +96,53 @@ def undone(row) -> int:
     return n
 
 
+def recovery(row) -> Dict[str, int]:
+    """Per goal: did its first attempt really fail, and was it met at the end?"""
+    tr, out = row["transcript"], {"needed": 0, "recovered": 0, "never_attempted": 0}
+    for gi, g in enumerate(row["_goals"]):
+        picks = [k for k, t in enumerate(tr) if t["tool"] == "pick" and t["args"].get("obj") == mover(g)]
+        final = bool(row["goals_met"][gi]) if gi < len(row.get("goals_met", [])) else False
+        if not picks:
+            out["never_attempted"] += not final
+            continue
+        nxt = next((t for t in tr[picks[0] + 1:] if t["tool"] in ACTS), None)
+        first_ok = bool(tr[picks[0]]["truth"]) and nxt is not None and nxt["tool"] == "place_on" \
+            and bool(nxt["truth"])
+        if not first_ok:
+            out["needed"] += 1
+            out["recovered"] += final
+    return out
+
+
+CAUSES = ("out of calls", "believed a false success", "gave up, report showed unmet", "never looked",
+          "constraint violated")
+
+
+def why_failed(row) -> Optional[str]:
+    """One cause per failed episode, read off the transcript."""
+    if row["success"]:
+        return None
+    if not row["declared_done"]:
+        return "out of calls"
+    tr = row["transcript"]
+    unmet = [g for gi, g in enumerate(row["_goals"]) if not row["goals_met"][gi]]
+    if not unmet:
+        return "constraint violated"
+    acts = [k for k, t in enumerate(tr) if t["tool"] in ACTS]
+    after = acts[-1] if acts else -1
+    labels = []
+    for g in unmet:
+        looks = [goal_met(g, t["visible"].get("result")) for t in tr[after + 1:] if t["tool"] == "observe"]
+        looks = [x for x in looks if x is not None]
+        if not looks:
+            labels.append("never looked")
+        elif sum(looks) * 2 > len(looks) or (sum(looks) * 2 == len(looks) and looks[-1]):
+            labels.append("believed a false success")
+        else:
+            labels.append("gave up, report showed unmet")
+    return next(c for c in CAUSES if c in labels)
+
+
 def wilson(k: int, n: int):
     if n == 0:
         return (None, None)
@@ -202,6 +249,30 @@ def main(out_dir: str) -> None:
             res["events"].append(rec)
             L.append(f"  {key[0]:<7}{key[1]:<12}{key[2]:<9}{direction:<15}{n:>7}{rec['cross_checked']:>10.2f}"
                      f"{rec['adopted']:>9.2f}{str(rec['adopted_ci']):>16}{rec['episode_success']:>12.2f}")
+
+    res["recovery"], res["failures"] = [], []
+    L.append("\nRecovery: goals whose first attempt really failed, and how many were met at the end")
+    L.append(f"  {'agent':<7}{'perception':<12}{'info':<9}{'first attempt failed':>21}{'recovered':>11}{'95% CI':>16}"
+             f"{'goals never attempted':>23}")
+    for key in sorted(cell):
+        rec = defaultdict(int)
+        for r in cell[key]:
+            for k, v in recovery(r).items():
+                rec[k] += v
+        rate = rec["recovered"] / rec["needed"] if rec["needed"] else float("nan")
+        res["recovery"].append({"agent": key[0], "perception": key[1], "info": key[2], **rec,
+                                "rate": round(rate, 3), "ci": wilson(rec["recovered"], rec["needed"])})
+        L.append(f"  {key[0]:<7}{key[1]:<12}{key[2]:<9}{rec['needed']:>21}{rate:>11.2f}"
+                 f"{str(wilson(rec['recovered'], rec['needed'])):>16}{rec['never_attempted']:>23}")
+
+    L.append("\nWhy episodes failed (episodes per cause)")
+    L.append(f"  {'agent':<7}{'perception':<12}{'info':<9}{'failed':>7}" + "".join(f"{c[:22]:>24}" for c in CAUSES))
+    for key in sorted(cell):
+        cs = [why_failed(r) for r in cell[key]]
+        cnt = {c: cs.count(c) for c in CAUSES}
+        res["failures"].append({"agent": key[0], "perception": key[1], "info": key[2],
+                                "failed": sum(cnt.values()), **cnt})
+        L.append(f"  {key[0]:<7}{key[1]:<12}{key[2]:<9}{sum(cnt.values()):>7}" + "".join(f"{cnt[c]:>24}" for c in CAUSES))
 
     w = {k: sum(r.get(k, 0) for r in rows) for k in ("warn_tp", "warn_fp", "warn_fn", "warn_tn")}
     fail, ok = w["warn_tp"] + w["warn_fn"], w["warn_fp"] + w["warn_tn"]

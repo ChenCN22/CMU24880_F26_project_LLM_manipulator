@@ -42,6 +42,8 @@ ap.add_argument("--families", default="ordered_stack,blocked_rearrange,constrain
 ap.add_argument("--episodes", type=int, default=20)
 ap.add_argument("--p-false-success", type=float, default=0.30)
 ap.add_argument("--p-false-failure", type=float, default=0.10)
+ap.add_argument("--p-bad", default="0.90,0.30", help="persistent: false success, false failure of a goal's bad camera")
+ap.add_argument("--p-good", default="0.05,0.02", help="persistent: the same for its other two cameras")
 ap.add_argument("--p-drop", type=float, default=0.0, help="executor: chance per skill call of dropping the block")
 ap.add_argument("--p-misplace", type=float, default=0.0, help="executor: chance per skill call of a shifted goal")
 ap.add_argument("--policy", default="checkpoints/tqc_her_600000_steps.zip")
@@ -118,8 +120,10 @@ for agent_name, pmode, info in cells:
             ex = FrozenSkillExecutor(env, policy_path=a.policy, max_steps=100, seed=seed,
                                      p_drop=a.p_drop, p_misplace=a.p_misplace)
             iface = ToolInterface(env, ex, spec, observe_budget=None, max_calls=a.max_calls,
-                                  perception=PerceptionModel(spec, seed, pmode, a.p_false_success,
-                                                             a.p_false_failure),
+                                  perception=PerceptionModel(
+                                      spec, seed, pmode, a.p_false_success, a.p_false_failure,
+                                      bad=tuple(map(float, a.p_bad.split(","))),
+                                      good=tuple(map(float, a.p_good.split(",")))),
                                   info=info, critic_calib=calib, hide_claims=True)
             t0, err, usage = time.time(), None, {}
             try:

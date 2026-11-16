@@ -72,7 +72,7 @@ python demo_gui.py --driver A8 --perception persistent --info monitor
 | name | design |
 |---|---|
 | A2 | ReAct: one tool call at a time, sees every result |
-| A5 | A2 + forced cross-check: every action must be looked at, every look is repeated from a second camera (a third if the two disagree) before the agent may finish |
+| A5 | A2 + forced cross-check: every action must be looked at before the agent may finish, every look is repeated from a second camera (a third if the two disagree), and the majority answer is handed to the model as one combined report |
 | A6 | A2 + mandatory self-assessment after every result |
 | A7 | A2 + an explicit belief table over the goals, updated after every result |
 | A8 | A2 + an independent reviewer: a second LLM call that sees only the instruction and the raw tool log, not the operator's reasoning |
@@ -89,15 +89,14 @@ looks), `trust` (believes one camera report, retries up to 4 times), `vote`
 the cameras (`front`, `top`, `side`) are the only way to learn its outcome.
 
 **Perception error** (`agent_iface/perception.py`), defined against the truth:
-a goal that is *not* met is reported as met with probability 0.30 (false
-success); a goal that *is* met is reported as unmet with probability 0.10 (false
-failure).
+*false success* reports a goal that is not met as met; *false failure* reports a
+goal that is met as unmet. A block in the gripper is never misreported.
 
 | mode | meaning |
 |---|---|
 | `none` | the camera is always right |
-| `transient` | each look errs independently; looking again usually helps |
-| `persistent` | the same camera repeats the same error on the same scene; another camera draws afresh |
+| `transient` | every look errs independently, the same for all cameras (false success 0.30, false failure 0.10); looking again usually helps |
+| `persistent` | each goal has one badly placed camera that is wrong about it most of the time (0.90 / 0.30) while the other two are nearly always right (0.05 / 0.02). The same camera repeats its error on an unchanged scene, so only another view helps. One look from a random camera is wrong about as often as in `transient` (0.33), a majority of three is not (0.09 against 0.22) |
 | `random` | control: an arbitrary block is misplaced in the report, unrelated to the task |
 
 **Information given to the agent**
@@ -105,7 +104,7 @@ failure).
 | level | meaning |
 |---|---|
 | `none` | raw camera reports |
-| `label` | each report carries a fixed note on how reliable the cameras are |
+| `label` | each report carries a fixed note that cameras can be wrong and that different cameras are independent checks |
 | `monitor` | label + a receipt that cross-checks the report against what the gripper did, + an early warning from the skill's own critic |
 
 **Tasks** (`envs/task_specs.py`): `ordered_stack`, `blocked_rearrange`,

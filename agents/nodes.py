@@ -332,11 +332,29 @@ def make_crosscheck_node(iface):
         second = iface.call(tool, a2)
         hist.append("[automatic second view] " + render_result(tool, a2, second))
         steps += 1
+        seen = [first] + ([second] if second.get("ok") else [])
         if second.get("ok") and answer(second) != answer(first) and not iface.finished:
             a3 = {**args, "view": others[1]}
             third = iface.call(tool, a3)
             hist.append("[automatic third view, the first two disagreed] " + render_result(tool, a3, third))
             steps += 1
+            if third.get("ok"):
+                seen.append(third)
+        # Fuse the views in control flow: the answer most of them give becomes the
+        # report the model is asked to act on.  No truth is involved.
+        if len(seen) >= 2:
+            counts: Dict[str, int] = {}
+            for v in seen:
+                counts[answer(v)] = counts.get(answer(v), 0) + 1
+            best, votes = max(counts.items(), key=lambda kv: kv[1])
+            bare = {k: v for k, v in args.items() if k != "view"}
+            if votes >= 2:
+                agreed = next(v for v in seen if answer(v) == best)
+                fused = {k: v for k, v in agreed.items() if k != "view"}
+                hist.append(f"[combined report: {votes} of {len(seen)} views agree] " + render_result(tool, bare, fused))
+            else:
+                hist.append(f"[combined report: the {len(seen)} views all disagree; the state of this is unknown] "
+                            + render_result(tool, bare, {"ok": False, "error": "views disagree"}))
         return {"history": hist, "steps": steps, "unverified": False, "stop": iface.finished}
     return crosscheck_node
 

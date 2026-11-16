@@ -17,27 +17,54 @@ env = MultiObjectTabletopEnv(n_objects=4, render_mode="rgb_array", fence=0.19)
 FAMS = ("ordered_stack", "blocked_rearrange", "constrained_place")
 
 # 1. mode none never alters the report; error rates match their definition; persistent repeats
+def with_goal_met(graph, goal):
+    """The same scene with one goal made true."""
+    import copy
+    g = copy.deepcopy(graph)
+    PerceptionModel._set(None, g, goal, True)
+    return g
+
+
 n = Counter()
 for fam in FAMS:
-    for seed in range(1000, 1100):
+    for seed in range(1000, 1400):
         env.reset(seed=seed)
         spec, g = sample(fam, env.object_names, seed), scene_graph(env)
         assert PerceptionModel(spec, seed, "none").perceive(g, "front") == (g, None)
         for mode in ("transient", "persistent"):
             pm = PerceptionModel(spec, seed, mode)
+            shown = {}
             for view in VIEWS:
                 out, fault = pm.perceive(g, view)
                 assert (fault is None) == (out == g), (mode, fault)
-                for goal in pm.goals:                 # nothing has been done yet: every goal is unmet
-                    n[mode, "readings"] += 1
-                    n[mode, "false_success"] += pm._met(goal, out)
+                shown[view] = out
                 if mode == "persistent":
                     for _ in range(3):
                         assert pm.perceive(g, view)[0] == out, "persistent error did not repeat"
-for mode in ("transient", "persistent"):
-    r = n[mode, "false_success"] / n[mode, "readings"]
-    print(f"{mode:<11} P(shown met | unmet) = {r:.3f} over {n[mode, 'readings']} readings")
-    assert 0.25 < r < 0.35, r
+            for goal in pm.goals:                     # nothing has been done yet: every goal is unmet
+                votes = [pm._met(goal, shown[v]) for v in VIEWS]
+                n[mode, "fs", "n"] += 1
+                n[mode, "fs", "one view"] += votes[seed % 3]          # an arbitrary single camera
+                n[mode, "fs", "majority"] += sum(votes) >= 2
+            goal = pm.goals[0]                         # and the first goal, once it has been achieved
+            done = with_goal_met(g, goal)
+            votes = [not pm._met(goal, pm.perceive(done, v)[0]) for v in VIEWS]
+            n[mode, "ff", "n"] += 1
+            n[mode, "ff", "one view"] += votes[seed % 3]
+            n[mode, "ff", "majority"] += sum(votes) >= 2
+            held = dict(done, held=goal.get("obj") or goal.get("top"))
+            for v in VIEWS:
+                fault = pm.perceive(held, v)[1]
+                assert fault is None or all(e["goal"] != goal for e in fault["errors"]), "a held block was misreported"
+EXPECT = {("transient", "fs"): (0.30, 0.216), ("transient", "ff"): (0.10, 0.028),
+          ("persistent", "fs"): (0.333, 0.088), ("persistent", "ff"): (0.113, 0.012)}
+for (mode, kind), (one, maj) in EXPECT.items():
+    N = n[mode, kind, "n"]
+    r1, r3 = n[mode, kind, "one view"] / N, n[mode, kind, "majority"] / N
+    name = "false success" if kind == "fs" else "false failure"
+    print(f"{mode:<11}{name:<14} one view {r1:.3f} (expect {one:.3f})   majority of three {r3:.3f} "
+          f"(expect {maj:.3f})   n={N}")
+    assert abs(r1 - one) < 0.04 and abs(r3 - maj) < 0.03, (mode, kind, r1, r3)
 
 # 2. through the tool interface: views, labels, receipts, nothing hidden leaks
 env.reset(seed=1003)

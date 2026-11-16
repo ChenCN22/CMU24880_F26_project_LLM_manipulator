@@ -76,6 +76,7 @@ python demo_gui.py --driver A8 --perception persistent --info monitor
 | A6 | A2 + mandatory self-assessment after every result |
 | A7 | A2 + an explicit belief table over the goals, updated after every result |
 | A8 | A2 + an independent reviewer: a second LLM call that sees only the instruction and the raw tool log, not the operator's reasoning |
+| A9 | evidence-aware recovery (`agents/evidence.py`): code keeps, for every goal, what each camera said since the arm last moved, fuses it in log-odds on top of a prior, treats "block not visible" as no evidence, re-reads every goal after any arm movement, reads pick success from the fingers, and refuses `done` or a re-pick that the evidence contradicts. The model parses the goals and chooses the actions |
 
 A1, A3 and A4 (plan-and-execute, reflection, cross-episode memory) belong to the
 earlier, perfect-camera study and are run with `run_sweep.py`.

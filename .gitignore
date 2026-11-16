@@ -5,3 +5,4 @@ results/
 *.log
 .vscode/
 .idea/
+*.zip

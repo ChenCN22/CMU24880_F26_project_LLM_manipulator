@@ -127,8 +127,11 @@ build_a8 = _after_every_result("review", make_review_node)     # ReAct + indepen
 build_a7 = _after_every_result("belief", make_belief_node)     # ReAct + explicit goal-status table
 
 
+from .evidence import build_a9  # noqa: E402
+
 BUILDERS: Dict[str, Callable[..., Any]] = {
     "A1": build_a1, "A2": build_a2, "A3": build_a3, "A4": build_a4, "A5": build_a5, "A6": build_a6, "A7": build_a7, "A8": build_a8,
+    "A9": build_a9,
 }
 DESCRIPTIONS = {
     "A1": "plan-and-execute (no feedback)",
@@ -139,6 +142,7 @@ DESCRIPTIONS = {
     "A6": "ReAct + mandatory assessment of every result",
     "A7": "ReAct + explicit belief state over the goals",
     "A8": "ReAct + independent reviewer agent (sees the log, not the reasoning)",
+    "A9": "evidence-aware recovery: per-goal evidence kept by code, the model decides on its summary",
 }
 
 

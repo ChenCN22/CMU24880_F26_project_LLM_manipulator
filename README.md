@@ -120,7 +120,16 @@ The physics is deterministic: the same seed and the same tool calls give
 bit-identical block positions, in any order and across processes. This needs
 both PyBullet's `deterministicOverlappingPairs` (set in `envs/tabletop.py`) and a
 new simulator per episode (done in `run_perception_sweep.py`);
-`tests/test_determinism.py` checks it. The LLM is called at temperature 0.
+`tests/test_determinism.py` checks it.
+
+The LLM is called at temperature 0, but Ollama is still not bit-reproducible:
+the same prompt can return a different answer on another run (measured: 2 of 8
+ReAct episodes changed outcome between two identical runs). Each run folder
+therefore keeps an answer cache, `llm_cache.jsonl`: every distinct prompt is put
+to the model once and its answer is reused. Two conditions of the same agent
+then behave differently only from the point where their prompts differ, and
+rerunning a folder reproduces it exactly. Run one sweep per output folder at a
+time; several folders can run in parallel.
 
 ## Output
 

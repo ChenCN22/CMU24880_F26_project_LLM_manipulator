@@ -190,5 +190,6 @@ def observe(graph: Dict[str, Any], query: str) -> Dict[str, Any]:
             "on_top_of": graph["on_top_of"].get(obj),
             "clear": graph["clear"].get(obj),
             "off_table": obj in graph["off_table"],
+            "held": graph.get("held") == obj,       # in the gripper right now
         }
     return {"error": f"unsupported query {q!r}", "supported": list(OBSERVE_QUERIES)}

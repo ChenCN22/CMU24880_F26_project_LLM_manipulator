@@ -155,8 +155,8 @@ ASSESS_FORMAT = """Reply with exactly one JSON object and nothing else:
 
 BELIEF_FORMAT = """Reply with exactly one JSON object and nothing else:
 {"goals": [{"goal": "<one part of the instruction>", "status": "met"|"unmet"|"uncertain",
-            "evidence": "<which results support this, and any that contradict it>"}, ...]}
-List every part of the instruction, in order."""
+            "evidence": "<the result that decides it, in at most 12 words; do not quote the log>"}, ...]}
+List every part of the instruction, in order, and nothing else."""
 
 REVIEWER_ROLE = """
 

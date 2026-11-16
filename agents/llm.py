@@ -6,7 +6,9 @@ else.  Every call is counted: token cost is one of the axes the comparison is
 scored on, and an agent that wins on success while spending three times the
 tokens has not obviously won.
 """
+import hashlib
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -50,6 +52,23 @@ class LLMBackbone:
     usage: Usage = field(default_factory=Usage)
     trace: List[Dict[str, Any]] = field(default_factory=list)   # one entry per call: what came back
     keep_messages: bool = False                                  # also keep the full prompt of each call
+    # Ollama is not bit-reproducible at temperature 0: the same prompt can come back
+    # with a different answer on another run.  With a cache file, each distinct
+    # prompt is put to the model once and its answer reused, so two conditions
+    # behave differently only from the point where their prompts differ.
+    cache_path: Optional[str] = None
+    _cache: Optional[Dict[str, Any]] = None
+
+    def _load_cache(self) -> Dict[str, Any]:
+        if self._cache is None:
+            self._cache = {}
+            if self.cache_path and os.path.exists(self.cache_path):
+                with open(self.cache_path) as f:
+                    for line in f:
+                        if line.strip():
+                            e = json.loads(line)
+                            self._cache[e["key"]] = e
+        return self._cache
 
     # ------------------------------------------------------------------ plumbing
     def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -80,6 +99,22 @@ class LLMBackbone:
                 "seed": self.seed,
             },
         }
+        key = None
+        if self.cache_path:
+            key = hashlib.sha256(json.dumps(
+                [self.model, self.temperature, self.seed, self.num_ctx, self.num_predict, schema, messages],
+                sort_keys=True).encode()).hexdigest()
+            hit = self._load_cache().get(key)
+            if hit is not None:
+                self.usage.calls += 1
+                self.usage.prompt_tokens += hit["pt"]
+                self.usage.output_tokens += hit["ot"]
+                self.usage.seconds += hit["sec"]
+                entry = {"out": hit["out"]}
+                if self.keep_messages:
+                    entry["messages"] = messages
+                self.trace.append(entry)
+                return hit["out"]
         attempt_msgs = list(messages)
         for attempt in range(retries + 1):
             body["messages"] = attempt_msgs
@@ -106,6 +141,12 @@ class LLMBackbone:
                 if self.keep_messages:
                     entry["messages"] = attempt_msgs
                 self.trace.append(entry)
+                if key is not None and attempt == 0:
+                    rec = {"key": key, "out": obj, "pt": int(r.get("prompt_eval_count", 0)),
+                           "ot": int(r.get("eval_count", 0)), "sec": round(time.time() - t0, 3)}
+                    self._cache[key] = rec
+                    with open(self.cache_path, "a") as f:
+                        f.write(json.dumps(rec) + "\n")
                 return obj if isinstance(obj, dict) else {"value": obj}
             except json.JSONDecodeError:
                 self.usage.malformed += 1

@@ -51,6 +51,7 @@ ap.add_argument("--calib", default="checkpoints/critic_calib.json")
 ap.add_argument("--model", default="qwen2.5:14b")
 ap.add_argument("--host", default="http://localhost:11434")
 ap.add_argument("--max-calls", type=int, default=40)
+ap.add_argument("--llm-cache", default=None, help="answer cache file; default <out>/llm_cache.jsonl, 'off' to disable")
 ap.add_argument("--seed-base", type=int, default=1000)
 ap.add_argument("--out", default="results/perception")
 a = ap.parse_args()
@@ -75,7 +76,8 @@ if AGENTS:
     from agents import graphs
     from agents.llm import LLMBackbone
     from agents.nodes import SYSTEM_V2
-    llm = LLMBackbone(model=a.model, host=a.host)
+    llm = LLMBackbone(model=a.model, host=a.host,
+                      cache_path=None if a.llm_cache == "off" else (a.llm_cache or os.path.join(a.out, "llm_cache.jsonl")))
 
 
 def run_scripted(iface: ToolInterface, spec: Dict[str, Any], how: str) -> None:

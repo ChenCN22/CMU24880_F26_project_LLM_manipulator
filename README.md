@@ -98,6 +98,28 @@ goal that is met as unmet. A block in the gripper is never misreported.
 | `transient` | every look errs independently, the same for all cameras (false success 0.30, false failure 0.10); looking again usually helps |
 | `persistent` | each goal has one badly placed camera that is wrong about it most of the time (0.90 / 0.30) while the other two are nearly always right (0.05 / 0.02). The same camera repeats its error on an unchanged scene, so only another view helps. One look from a random camera is wrong about as often as in `transient` (0.33), a majority of three is not (0.09 against 0.22) |
 | `random` | control: an arbitrary block is misplaced in the report, unrelated to the task |
+| `vlm` | nothing is injected: a vision-language model reads a rendered camera image (see below) |
+
+**Perception from images** (`agent_iface/vlm_perception.py`). With `--perception vlm`
+every look renders the asked camera (front, top or side) and a vision-language
+model (`qwen2.5vl:7b`) finds the four cubes in the image. Calibrated camera
+geometry then turns each box into a place: which pad the cube is on, or which
+cube it is stacked on. Before a picture is taken the empty hand moves up and
+back out of the cameras' way. The errors are the perception system's own and
+depend on the viewpoint, for example a cube standing behind another one looks
+stacked from the side camera.
+
+```bash
+# how well does the reader do, per camera, against the true scene?
+python tests/eval_vlm.py --style detect --episodes 8 --out results/vlm_eval
+# closed loop
+python run_perception_sweep.py --agents A2,A5 --perception vlm,none --info none --out results/vlm
+```
+
+`--style scene` and `--style cube` ask the model directly where each cube is; on
+this scene that was far less accurate than detection plus geometry.
+`qwen2.5vl` needs a recent Ollama (0.7 or later); `--vlm-host` and `--host` say
+which server serves the VLM and the agent LLM.
 
 **Information given to the agent**
 

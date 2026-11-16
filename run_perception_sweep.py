@@ -2,7 +2,7 @@
 
 Grid:  perception error  x  information given to the agent  x  agent  x  family  x  episode
 
-  perception   none | transient | persistent | random(control)
+  perception   none | transient | persistent | random(control) | vlm (camera images read by a VLM)
   info         none | label | monitor
   agent        A2 (ReAct) | A5 (ReAct + forced cross-check)
                A6 (+ self-assessment) | A7 (+ belief state) | A8 (+ independent reviewer)
@@ -50,6 +50,9 @@ ap.add_argument("--policy", default="checkpoints/tqc_her_600000_steps.zip")
 ap.add_argument("--calib", default="checkpoints/critic_calib.json")
 ap.add_argument("--model", default="qwen2.5:14b")
 ap.add_argument("--host", default="http://localhost:11434")
+ap.add_argument("--vlm-model", default="qwen2.5vl:7b", help="perception=vlm: the vision-language model")
+ap.add_argument("--vlm-host", default="http://127.0.0.1:11435")
+ap.add_argument("--vlm-style", default="detect", help="detect (boxes + camera geometry) or scene/cube (direct answers)")
 ap.add_argument("--max-calls", type=int, default=40)
 ap.add_argument("--llm-cache", default=None, help="answer cache file; default <out>/llm_cache.jsonl, 'off' to disable")
 ap.add_argument("--seed-base", type=int, default=1000)
@@ -121,12 +124,16 @@ for agent_name, pmode, info in cells:
             spec = sample(family, env.object_names, seed)
             ex = FrozenSkillExecutor(env, policy_path=a.policy, max_steps=100, seed=seed,
                                      p_drop=a.p_drop, p_misplace=a.p_misplace)
+            if pmode == "vlm":                           # real images read by a VLM, nothing injected
+                from agent_iface.vlm_perception import VLMPerception
+                perception = VLMPerception(env, spec, seed, model=a.vlm_model, host=a.vlm_host, style=a.vlm_style,
+                                           cache_path=os.path.join(a.out, "vlm_cache.jsonl"))
+            else:
+                perception = PerceptionModel(spec, seed, pmode, a.p_false_success, a.p_false_failure,
+                                             bad=tuple(map(float, a.p_bad.split(","))),
+                                             good=tuple(map(float, a.p_good.split(","))))
             iface = ToolInterface(env, ex, spec, observe_budget=None, max_calls=a.max_calls,
-                                  perception=PerceptionModel(
-                                      spec, seed, pmode, a.p_false_success, a.p_false_failure,
-                                      bad=tuple(map(float, a.p_bad.split(","))),
-                                      good=tuple(map(float, a.p_good.split(",")))),
-                                  info=info, critic_calib=calib, hide_claims=True)
+                                  perception=perception, info=info, critic_calib=calib, hide_claims=True)
             t0, err, usage = time.time(), None, {}
             try:
                 if agent_name in BASES:

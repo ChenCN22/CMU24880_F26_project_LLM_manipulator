@@ -7,7 +7,8 @@ Reads episodes.jsonl and writes analysis.json + analysis.txt next to it.
 Episode level   success, false completion, cost; each faulted cell against its
                 same-seed fault-free twin (paired bootstrap on the difference).
 Event level     every camera answer that misreported a goal is one event:
-                  cross_checked  the agent looked again from another view before acting
+                  cross_checked  another view was consulted between the action before the
+                                 wrong report and the next one (before or after that report)
                   adopted        its next move followed the wrong report
                                  (false success -> done / moved on;
                                   false failure -> picked the finished block up again)
@@ -65,8 +66,10 @@ def events(row) -> List[Dict[str, Any]]:
             nxt = next((u for u in later if u["tool"] not in LOOKS), None)
             before = later[:later.index(nxt)] if nxt is not None else later
             view = t["visible"].get("view")
+            start = max((j for j in range(k) if tr[j]["tool"] not in LOOKS), default=-1)
+            window = tr[start + 1:k] + before              # every look between two non-look calls
             crossed = any(u["tool"] in LOOKS and u["visible"].get("view") not in (None, view)
-                          for u in before)
+                          for u in window)
             redo = nxt is not None and nxt["tool"] == "pick" and nxt["args"].get("obj") == mover(g)
             if shown:                                      # false success
                 adopted = nxt is not None and not redo     # done, or went on to something else
@@ -114,7 +117,7 @@ def recovery(row) -> Dict[str, int]:
     return out
 
 
-CAUSES = ("out of calls", "believed a false success", "gave up, report showed unmet", "never looked",
+CAUSES = ("out of calls", "believed a false success", "gave up, report showed unmet", "not checked at the end",
           "constraint violated")
 
 
@@ -135,7 +138,7 @@ def why_failed(row) -> Optional[str]:
         looks = [goal_met(g, t["visible"].get("result")) for t in tr[after + 1:] if t["tool"] == "observe"]
         looks = [x for x in looks if x is not None]
         if not looks:
-            labels.append("never looked")
+            labels.append("not checked at the end")
         elif sum(looks) * 2 > len(looks) or (sum(looks) * 2 == len(looks) and looks[-1]):
             labels.append("believed a false success")
         else:

@@ -56,6 +56,8 @@ ap.add_argument("--vlm-style", default="detect", help="detect (boxes + camera ge
 ap.add_argument("--max-calls", type=int, default=40)
 ap.add_argument("--llm-cache", default=None, help="answer cache file; default <out>/llm_cache.jsonl, 'off' to disable")
 ap.add_argument("--seed-base", type=int, default=1000)
+ap.add_argument("--memory", default=None, help="A10: file of the cross-episode skill memory")
+ap.add_argument("--learn", action="store_true", help="A10: add this run's episodes to the memory (else it is frozen)")
 ap.add_argument("--out", default="results/perception")
 a = ap.parse_args()
 
@@ -81,6 +83,12 @@ if AGENTS:
     from agents.nodes import SYSTEM_V2
     llm = LLMBackbone(model=a.model, host=a.host,
                       cache_path=None if a.llm_cache == "off" else (a.llm_cache or os.path.join(a.out, "llm_cache.jsonl")))
+    memory = None
+    if any(x.startswith("A10") for x in AGENTS):
+        from agents.skill_memory import SkillMemory
+        memory = SkillMemory(a.memory, learn=a.learn)
+        print(f"[perception] skill memory: {len(memory.records)} records, {len(memory.lessons)} lessons, "
+              f"{'learning' if a.learn else 'frozen'}", flush=True)
 
 
 def run_scripted(iface: ToolInterface, spec: Dict[str, Any], how: str) -> None:
@@ -140,11 +148,14 @@ for agent_name, pmode, info in cells:
                     run_scripted(iface, spec, agent_name)
                 else:
                     llm.reset_usage()
-                    graphs.build(agent_name, iface, llm, None, SYSTEM_V2).invoke(
+                    graphs.build(agent_name, iface, llm, memory if agent_name.startswith("A10") else None,
+                                 SYSTEM_V2).invoke(
                         {"instruction": spec["instruction"], "history": [], "reflections": [],
                          "memories": [], "steps": 0, "stop": False},
                         {"recursion_limit": a.max_calls * 4 + 20})
                     usage = llm.usage.as_dict()
+                    if agent_name.startswith("A10") and a.learn:
+                        memory.end_episode(llm)
             except Exception as e:                      # noqa: BLE001
                 err = f"{type(e).__name__}: {e}"
             for t in iface.transcript:                   # the per-call scene dump is not needed here
@@ -153,7 +164,8 @@ for agent_name, pmode, info in cells:
                    "episode": ep, "seed": seed, "instruction": spec["instruction"],
                    **iface.score(), **usage, "wall_seconds": round(time.time() - t0, 2),
                    "error": err, "transcript": iface.transcript,
-                   "llm_outputs": [t["out"] for t in llm.trace] if agent_name not in BASES else []}
+                   "llm_outputs": [t["out"] for t in llm.trace] if agent_name not in BASES else [],
+                   **({"plans": getattr(iface, "plans", [])} if agent_name.startswith("A10") else {})}
             jsonl.write(json.dumps(row, default=str) + "\n")
             jsonl.flush()
             env.close()

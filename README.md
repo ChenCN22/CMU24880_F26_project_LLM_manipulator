@@ -77,6 +77,8 @@ python demo_gui.py --driver A8 --perception persistent --info monitor
 | A7 | A2 + an explicit belief table over the goals, updated after every result |
 | A8 | A2 + an independent reviewer: a second LLM call that sees only the instruction and the raw tool log, not the operator's reasoning |
 | A9 | evidence-aware recovery (`agents/evidence.py`): code keeps, for every goal, what each camera said since the arm last moved, fuses it in log-odds on top of a prior, treats "block not visible" as no evidence, re-reads every goal after any arm movement, reads pick success from the fingers, and refuses `done` or a re-pick that the evidence contradicts. The model parses the goals and chooses the actions |
+| A9-`part` | A9 with one part removed, for the ablation: `single` (one camera per check), `prior` (flat prior), `stale` (only the handled goal is re-read after a movement), `doubt` (no memory of outvoted cameras), `fingers` (a pick is assumed to work), `guards` (nothing is refused) |
+| A10-`form` | experimental: A9 on the free-choice tasks. The model chooses which blocks to use from a layout with positions and chooses again after every failed pick or placement. `form` is what it is told about the skill from earlier episodes: `none`, `episodic` (the last raw pick records), `lessons` (short rules the model wrote itself), `map` (the success rate of earlier picks near each block). `--memory <file>` names the store, `--learn` lets the run add to it |
 
 A1, A3 and A4 (plan-and-execute, reflection, cross-episode memory) belong to the
 earlier, perfect-camera study and are run with `run_sweep.py`.
@@ -131,7 +133,35 @@ which server serves the VLM and the agent LLM.
 | `monitor` | label + a receipt that cross-checks the report against what the gripper did, + an early warning from the skill's own critic |
 
 **Tasks** (`envs/task_specs.py`): `ordered_stack`, `blocked_rearrange`,
-`constrained_place`, four blocks on the table.
+`constrained_place`, four blocks on the table. In the free-choice families
+(`free_two_zones`, `free_three_zones`, `free_stack`, `free_two_stacks`) the
+instruction says what to build but not with which blocks.
+
+## Where the skill fails
+
+```bash
+# scripted episodes on seeds 6000+: every pick and placement with what was known before it
+python tests/skill_limits.py --episodes 200 --out results/skill_limits
+python analyze_skill_limits.py results/skill_limits/episodes.jsonl
+# what knowing these limits is worth when the task leaves a choice of blocks (seeds 6200+)
+python tests/skill_choice.py --fit results/skill_limits/episodes.jsonl --out results/skill_choice
+```
+
+The first script logs, for each call, where the block was, how close the rim
+and the other blocks were, and what happened to the block last time. The second
+compares scripted ways of choosing blocks: the ones the task names, a fitted
+model of pick success, switching after a failure blindly, by a one-sentence
+rule, or by the model.
+
+## Seeds
+
+| seeds | used for |
+|---|---|
+| 1000-1019 | test runs up to A9 |
+| 2000-2039 | hold-out for A9 and its ablation, and the comparison of language models. No agent was run or tuned on them before; `tests/calibrate_critic.py` drew scripted episodes from 2000+ and 3000+ |
+| 4000+, 5000+, 7000+ | development |
+| 6000-6199 | measuring the skill (`tests/skill_limits.py`) |
+| 6200-6399 | choice experiment (`tests/skill_choice.py`) |
 
 ## Reproducibility
 
@@ -168,11 +198,11 @@ acted on it or not), and the hit rate of the critic warning.
 ```
 envs/          tabletop scene, symbolic scene graph, task families
 agent_iface/   frozen-skill executor, tool interface, perception model, critic warning
-agents/        LLM backbone, LangGraph nodes and graphs (A1-A8)
+agents/        LLM backbone, LangGraph nodes and graphs (A1-A10), evidence fusion, skill memory
 skill/         training script for the pick-and-place policy
 checkpoints/   the frozen skill (TQC+HER, 600k steps) and the critic calibration
 tests/         interface, perception and determinism tests; calibration scripts
-scripts/       run_agents.sh
+scripts/       run_agents.sh; holdout.sh, ablation.sh, multi_llm.sh and holdout_pairs.py for the hold-out runs
 ```
 
 ## Adding an agent

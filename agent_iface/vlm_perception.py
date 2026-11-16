@@ -120,7 +120,7 @@ def backproject(V, P, w: int, h: int, u: float, v: float, z: float) -> np.ndarra
 
 
 def places_from_boxes(boxes: Dict[str, List[float]], names: List[str], V, P, w: int, h: int,
-                      view: str = "front") -> Dict[str, str]:
+                      view: str = "front", xy: Optional[Dict[str, List[float]]] = None) -> Dict[str, str]:
     """Turn cube boxes into places with the known camera and pad geometry.
 
     A cube's box centre is read as the cube centre.  It is either on the table
@@ -141,6 +141,8 @@ def places_from_boxes(boxes: Dict[str, List[float]], names: List[str], V, P, w: 
         below = [(float(np.linalg.norm(stack[n] - table[m])), m) for m in boxes if m != n]
         # from the front and the side a stacked cube is also drawn higher up than the one under it
         below = [(d, m) for d, m in below if d <= STACK_TOL and (view == "top" or boxes[n][1] < boxes[m][1])]
+        if xy is not None:                                   # where this camera puts the cube (m)
+            xy[n] = [float(v) for v in (stack[n] if below else table[n])]
         if below:
             out[n] = "on_" + min(below)[1]
             continue
@@ -277,8 +279,8 @@ class VLMPerception:
             img = render(self.env, view, labels=False, size=DETECT_SIZE)
             _, _, V, P = camera(self.env.sim.physics_client, view, w, h)
             found = self.boxes(img, view)
-            self.last_boxes = found
-            return img, places_from_boxes(found, list(self.env.object_names), V, P, w, h, view)
+            self.last_boxes, self.last_xy = found, {}
+            return img, places_from_boxes(found, list(self.env.object_names), V, P, w, h, view, self.last_xy)
         img = render(self.env, view)
         return img, self.ask(img, view, skip=skip)
 
@@ -359,8 +361,16 @@ class VLMPerception:
             os.makedirs(self.save_dir, exist_ok=True)
             k = len(os.listdir(self.save_dir))
             img.save(os.path.join(self.save_dir, f"{self.seed}_{k:04d}_{view}.png"))
+        est = getattr(self, "last_xy", None)
+        if est is not None:                                  # positions as this camera estimated them
+            est = {n: [x, y, graph["positions"][n][2]] for n, (x, y) in est.items() if n in out["in_zone"]}
+            held = graph.get("held")
+            if held is not None:
+                est[held] = graph["positions"][held]
         if _report(out) == _report(graph):
-            return graph, None
+            return (graph if est is None else dict(graph, positions=est)), None
+        if est is not None:
+            out["positions"] = est
         errors: List[Dict[str, Any]] = []
         for g in self.goals:
             was, now = self._met(g, graph), self._met(g, out)

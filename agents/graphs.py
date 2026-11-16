@@ -9,6 +9,7 @@ Nothing below changes the tools, the backbone, the prompt core or the way result
 are rendered.  The only variables are the edges and, through them, what is in the
 context window when the model is asked to choose.
 """
+import functools
 from typing import Any, Callable, Dict, Optional
 
 from langgraph.graph import END, StateGraph
@@ -133,6 +134,12 @@ BUILDERS: Dict[str, Callable[..., Any]] = {
     "A1": build_a1, "A2": build_a2, "A3": build_a3, "A4": build_a4, "A5": build_a5, "A6": build_a6, "A7": build_a7, "A8": build_a8,
     "A9": build_a9,
 }
+# A10: A9 for tasks that leave the blocks open, with a cross-episode memory of the skill in one of four forms
+for _form in ("none", "episodic", "lessons", "map"):
+    BUILDERS[f"A10-{_form}"] = functools.partial(build_a9, choice=_form)
+A9_PARTS = ("single", "prior", "stale", "doubt", "fingers", "guards")
+for _part in A9_PARTS:                                    # A9 with exactly one part removed
+    BUILDERS[f"A9-{_part}"] = functools.partial(build_a9, off=frozenset({_part}))
 DESCRIPTIONS = {
     "A1": "plan-and-execute (no feedback)",
     "A2": "ReAct",

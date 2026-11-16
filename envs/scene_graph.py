@@ -96,6 +96,11 @@ def _goal_met(g: Dict[str, Any], graph: Dict[str, Any]) -> bool:
         return bool(graph["clear"].get(g["obj"], False))
     if t == "on_table":
         return g["obj"] not in graph["off_table"]
+    if t == "zone_filled":                  # any block will do
+        return g["zone"] in graph["in_zone"].values()
+    if t == "stacks":                       # at least n two-block stacks, whichever blocks they use
+        on = graph["on_top_of"]
+        return len({b for b in on.values() if b is not None and on.get(b) is None}) >= g["n"]
     raise ValueError(f"unknown goal type {t!r}")
 
 
@@ -172,6 +177,14 @@ def observe(graph: Dict[str, Any], query: str) -> Dict[str, Any]:
     q = query.strip()
     if q == "scene":
         return {k: graph[k] for k in ("in_zone", "on_top_of", "clear", "off_table", "held")}
+    if q == "layout":
+        # The scene plus where each visible block is.  Not in OBSERVE_QUERIES: the earlier agents
+        # are never told about it, so what they see is unchanged.
+        # x points away from the robot, y to its left; the origin is the middle of the workspace
+        out = {k: graph[k] for k in ("in_zone", "on_top_of", "clear", "off_table", "held")}
+        out["positions_cm"] = {n: [round(100 * p[0], 1), round(100 * p[1], 1)]
+                               for n, p in graph["positions"].items() if n in graph["in_zone"]}
+        return out
     if q == "zones":
         return {"in_zone": graph["in_zone"]}
     if q == "stacks":

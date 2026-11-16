@@ -69,7 +69,46 @@ def constrained_place(objects: List[str], rng: np.random.Generator) -> Dict[str,
                             {"type": "keep_on_table", "obj": b}]}
 
 
+# ---- tasks that leave the blocks open -------------------------------------------------
+# The families above name every block, so an agent that knows where the skill is
+# weak can only stop retrying sooner.  These leave the choice of blocks to the
+# agent: which ones to move, and (for stacks) which one stays where it is.
+def free_two_zones(objects: List[str], rng: np.random.Generator) -> Dict[str, Any]:
+    """Two of four blocks are spare."""
+    z1, z2 = list(rng.permutation(ZONE_LIST))[:2]
+    return {"family": "free_two_zones",
+            "instruction": f"Put one block in {z1} and another block in {z2}. You may choose which blocks to use.",
+            "goals": [{"type": "zone_filled", "zone": z1}, {"type": "zone_filled", "zone": z2}],
+            "constraints": []}
+
+
+def free_three_zones(objects: List[str], rng: np.random.Generator) -> Dict[str, Any]:
+    """Longer, and only one block is spare."""
+    return {"family": "free_three_zones",
+            "instruction": "Put one block in each of zone_A, zone_B and zone_C. You may choose which blocks to use.",
+            "goals": [{"type": "zone_filled", "zone": z} for z in ZONE_LIST], "constraints": []}
+
+
+def free_stack(objects: List[str], rng: np.random.Generator) -> Dict[str, Any]:
+    return {"family": "free_stack",
+            "instruction": ("Build one stack of two blocks. You may choose which two blocks to use and which of "
+                            "them goes on top."),
+            "goals": [{"type": "stacks", "n": 1}], "constraints": []}
+
+
+def free_two_stacks(objects: List[str], rng: np.random.Generator) -> Dict[str, Any]:
+    """All four blocks are needed: a hard block cannot be left out, only given the job it can do."""
+    return {"family": "free_two_stacks",
+            "instruction": ("Build two separate stacks of two blocks each. You may choose how to pair the blocks "
+                            "and which block of each pair goes on top."),
+            "goals": [{"type": "stacks", "n": 1}, {"type": "stacks", "n": 2}], "constraints": []}
+
+
 FAMILIES = {
+    "free_two_zones": free_two_zones,
+    "free_three_zones": free_three_zones,
+    "free_stack": free_stack,
+    "free_two_stacks": free_two_stacks,
     "color_sort": color_sort,
     "ordered_stack": ordered_stack,
     "blocked_rearrange": blocked_rearrange,

@@ -1,0 +1,10 @@
+# Python 3.10. Versions are the ones the experiments were run with.
+numpy==2.2.6
+scipy==1.15.3
+torch==2.14.1
+gymnasium==1.4.0
+pybullet==3.2.7
+panda-gym==3.0.7
+stable-baselines3==2.9.2
+sb3-contrib==2.9.2
+langgraph==1.2.20

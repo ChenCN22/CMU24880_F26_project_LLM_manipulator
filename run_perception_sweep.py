@@ -139,7 +139,8 @@ for agent_name, pmode, info in cells:
             row = {"agent": agent_name, "perception": pmode, "info": info, "family": family,
                    "episode": ep, "seed": seed, "instruction": spec["instruction"],
                    **iface.score(), **usage, "wall_seconds": round(time.time() - t0, 2),
-                   "error": err, "transcript": iface.transcript}
+                   "error": err, "transcript": iface.transcript,
+                   "llm_outputs": [t["out"] for t in llm.trace] if agent_name not in BASES else []}
             jsonl.write(json.dumps(row, default=str) + "\n")
             jsonl.flush()
             env.close()

@@ -141,6 +141,31 @@ OBSERVE_QUERIES = (
 )
 
 
+def describe(graph: Dict[str, Any]) -> List[str]:
+    """The same scene, one plain sentence per block.  Says nothing a query could
+    not already expose and nothing about the task."""
+    out = []
+    for obj in graph["objects"]:
+        if obj in graph.get("hidden", ()):
+            out.append(f"{obj}: not detected by this camera")
+            continue
+        if obj in graph["off_table"]:
+            out.append(f"{obj}: off the table")
+            continue
+        below, zone = graph["on_top_of"].get(obj), graph["in_zone"].get(obj)
+        if graph.get("held") == obj:
+            where = "held in the gripper"
+        elif below:
+            where = f"on top of {below}"
+        elif zone:
+            where = f"on the table inside {zone}"
+        else:
+            where = "on the table, not inside any zone, not on any block"
+        above = [t for t, b in graph["on_top_of"].items() if b == obj]
+        out.append(f"{obj}: {where}" + (f"; {above[0]} is on top of it" if above else ""))
+    return out
+
+
 def observe(graph: Dict[str, Any], query: str) -> Dict[str, Any]:
     """Answer one restricted question about the graph.  Anything the agent does
     not ask about, it does not learn."""

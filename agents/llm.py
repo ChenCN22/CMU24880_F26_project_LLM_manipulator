@@ -48,6 +48,8 @@ class LLMBackbone:
     seed: int = 0
     timeout: float = 300.0
     usage: Usage = field(default_factory=Usage)
+    trace: List[Dict[str, Any]] = field(default_factory=list)   # one entry per call: what came back
+    keep_messages: bool = False                                  # also keep the full prompt of each call
 
     # ------------------------------------------------------------------ plumbing
     def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,6 +102,10 @@ class LLMBackbone:
                 obj = json.loads(text)
                 if attempt > 0:
                     self.usage.repairs += 1
+                entry: Dict[str, Any] = {"out": obj}
+                if self.keep_messages:
+                    entry["messages"] = attempt_msgs
+                self.trace.append(entry)
                 return obj if isinstance(obj, dict) else {"value": obj}
             except json.JSONDecodeError:
                 self.usage.malformed += 1
@@ -113,3 +119,4 @@ class LLMBackbone:
 
     def reset_usage(self) -> None:
         self.usage = Usage()
+        self.trace = []

@@ -14,7 +14,7 @@ properties are enforced here rather than trusted to the agents:
 import json
 from typing import Any, Dict, List, Optional
 
-from envs.scene_graph import evaluate, observe, scene_graph, violations
+from envs.scene_graph import describe, evaluate, observe, scene_graph, violations
 from envs.tabletop import ZONES
 
 from .critic import warning
@@ -266,6 +266,10 @@ class ToolInterface:
                     full["reliability"] = RELIABILITY_LABEL
                 if self.info == "monitor" and name == "observe":
                     full["monitor"] = self._receipt(shown)
+                if self.perception is not None and name == "observe" and "held" in shown and "in_zone" in shown:
+                    # the whole-scene report also comes as one sentence per block
+                    full[key] = {"description": describe(seen), **shown}
+                    full["_true"] = {"description": describe(true_graph), **real}
         else:  # done
             self.done_called = True
             full = {"ok": True, "ended": True}

@@ -77,14 +77,19 @@ TOOLS
 
 HOW THE WORLD WORKS
 - The gripper holds at most one block. place_on moves the block that is currently held, so it only
-  works straight after a pick; with nothing held it returns an error.
+  works straight after a pick. With nothing held the arm goes through the motion and nothing changes.
+- After place_on the gripper is empty, whether or not the block ended up where you wanted. A retry
+  therefore always starts with pick; place_on twice in a row does nothing.
 - pick and push both begin by opening the gripper. Calling either one while a block is held drops it.
 - Handle one block at a time: pick it, place_on its target, then start on the next block.
 - The low-level skill is unreliable. An action that fails can simply be tried again, and a second
   attempt often works.
-- You have a limited number of calls, and every tool call counts. Once you believe every part of the
-  instruction is satisfied, call done(). Acting on blocks that are already where they belong can undo
-  your own work.
+- After placing a block, look at the scene to see whether the block is where the instruction wants it.
+  If it is not, that attempt failed: pick the same block and place it again. A part of the instruction
+  may need several attempts.
+- Before calling done(), compare every part of the instruction with the most recent camera report.
+  Call done() only when the report shows every part satisfied, or when you have already tried a part
+  four times. Do not move blocks that the report shows are already where they belong.
 
 WHAT THE RESULTS MEAN
 pick, place_on and push return only that the motion was executed. They do not say whether it worked:
@@ -92,6 +97,35 @@ the block may have slipped out of the gripper, been dropped on the way, or been 
 place. The cameras are the only way to find out what the scene looks like after an action.
 
 observe and check_constraints return what one camera's perception system reports about the scene."""
+
+ACT_ASK = ("What is your next tool call? If every part of the instruction has already "
+           "been achieved, the next call is done().")
+def _ask_v2(state: "EpisodeState") -> str:
+    """The question put to the model each turn in the camera study.  It is built
+    from the log only -- whether a look has happened since the last action, and
+    how often each block has been picked -- never from the true scene."""
+    picks: Dict[str, int] = {}
+    for line in state.get("history") or []:
+        if line.startswith("pick(") or "] pick(" in line:
+            try:
+                obj = json.loads(line[line.index("(") + 1:line.index(") ->")]).get("obj")
+            except (ValueError, AttributeError):
+                obj = None
+            if obj:
+                picks[obj] = picks.get(obj, 0) + 1
+    count = ("PICK ATTEMPTS SO FAR: " + (", ".join(f"{o} x{n}" for o, n in picks.items()) or "none")
+             + ". A block may be attempted at most four times.\n\n")
+    if not state.get("history"):
+        return count + "What is your first tool call?"
+    if state.get("unverified"):
+        return count + ("You have acted since your last look, so you do not yet know the result. "
+                        "What is your next tool call?")
+    return count + ("Your most recent camera report is up to date; looking again without acting will show "
+                    "the same thing. Check each part of the instruction against that report. If a part is "
+                    "not shown as satisfied and its block has attempts left, pick that block now and then "
+                    "place it again. Only if every part is shown as satisfied, or no attempts are left, is "
+                    "the next call done(). What is your next tool call?")
+
 
 ACT_FORMAT = """Reply with exactly one JSON object and nothing else:
 {"thought": "<one sentence>", "tool": "<tool name>", "args": {<arguments>}}
@@ -233,8 +267,7 @@ def make_act_node(llm, system=None):
         out = llm.chat_json([
             {"role": "system", "content": (system or SYSTEM_CORE) + "\n\n" + ACT_FORMAT},
             {"role": "user", "content": _user_block(
-                state, "What is your next tool call? If every part of the instruction has already "
-                       "been achieved, the next call is done().")},
+                state, _ask_v2(state) if system is SYSTEM_V2 else ACT_ASK)},
         ], schema=ACT_SCHEMA)
         if not isinstance(out, dict) or out.get("tool") not in TOOL_NAMES:
             # an unparseable turn is a wasted turn, not a crash
@@ -262,6 +295,8 @@ def make_execute_node(iface):
         }
         if tool in ("pick", "place_on", "push"):
             out["unverified"] = True
+        elif tool in ("observe", "check_constraints") and visible.get("ok"):
+            out["unverified"] = False
         return out
     return execute_node
 

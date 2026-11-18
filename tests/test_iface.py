@@ -52,7 +52,7 @@ class TestInterface(unittest.TestCase):
             self.assertTrue(spec["instruction"])
             self.assertTrue(spec["goals"], f"{fam} produced no goals")
             for g in spec["goals"]:
-                self.assertIn(g["type"], ("in_zone", "on_top_of", "clear", "on_table"))
+                self.assertIn(g["type"], ("in_zone", "on_top_of", "clear", "on_table", "zone_filled", "stacks"))
 
     def test_ground_truth_never_leaks(self):
         """The single most important invariant in the codebase."""

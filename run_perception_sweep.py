@@ -47,9 +47,12 @@ ap.add_argument("--p-good", default="0.05,0.02", help="persistent: the same for 
 ap.add_argument("--p-drop", type=float, default=0.0, help="executor: chance per skill call of dropping the block")
 ap.add_argument("--p-misplace", type=float, default=0.0, help="executor: chance per skill call of a shifted goal")
 ap.add_argument("--policy", default="checkpoints/tqc_her_600000_steps.zip")
+ap.add_argument("--push-policy", default=None, help="push skill checkpoint; without it push drives the pick-and-place skill")
 ap.add_argument("--calib", default="checkpoints/critic_calib.json")
 ap.add_argument("--model", default="qwen2.5:14b")
 ap.add_argument("--host", default="http://localhost:11434")
+ap.add_argument("--think", default=None, choices=["off", "on"], help="models that can think: off or on (default: not sent)")
+ap.add_argument("--effort", default="none", help="openai:<model>: reasoning effort")
 ap.add_argument("--vlm-model", default="qwen2.5vl:7b", help="perception=vlm: the vision-language model")
 ap.add_argument("--vlm-host", default="http://127.0.0.1:11435")
 ap.add_argument("--vlm-style", default="detect", help="detect (boxes + camera geometry) or scene/cube (direct answers)")
@@ -81,7 +84,7 @@ if AGENTS:
     from agents import graphs
     from agents.llm import LLMBackbone
     from agents.nodes import SYSTEM_V2
-    llm = LLMBackbone(model=a.model, host=a.host,
+    llm = LLMBackbone(model=a.model, host=a.host, think=None if a.think is None else a.think == "on", effort=a.effort,
                       cache_path=None if a.llm_cache == "off" else (a.llm_cache or os.path.join(a.out, "llm_cache.jsonl")))
     memory = None
     if any(x.startswith("A10") for x in AGENTS):
@@ -131,7 +134,7 @@ for agent_name, pmode, info in cells:
             env.reset(seed=seed)
             spec = sample(family, env.object_names, seed)
             ex = FrozenSkillExecutor(env, policy_path=a.policy, max_steps=100, seed=seed,
-                                     p_drop=a.p_drop, p_misplace=a.p_misplace)
+                                     p_drop=a.p_drop, p_misplace=a.p_misplace, push_policy_path=a.push_policy)
             if pmode == "vlm":                           # real images read by a VLM, nothing injected
                 from agent_iface.vlm_perception import VLMPerception
                 perception = VLMPerception(env, spec, seed, model=a.vlm_model, host=a.vlm_host, style=a.vlm_style,

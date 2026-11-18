@@ -41,10 +41,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "push",
-        "description": "Push an object along a table-plane axis. Returns only the claimed outcome.",
+        "description": "Slide an object over the table, along an axis or toward the middle of the "
+                       "workspace ('center'). Returns only the claimed outcome.",
         "parameters": {"type": "object", "properties": {
             "obj": {"type": "string"},
-            "direction": {"type": "string", "enum": ["+x", "-x", "+y", "-y"]},
+            "direction": {"type": "string", "enum": ["+x", "-x", "+y", "-y", "center"]},
             "distance": {"type": "number", "description": "metres, 0.0-0.15"}},
             "required": ["obj", "direction", "distance"]},
     },

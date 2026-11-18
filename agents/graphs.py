@@ -137,6 +137,9 @@ BUILDERS: Dict[str, Callable[..., Any]] = {
 # A10: A9 for tasks that leave the blocks open, with a cross-episode memory of the skill in one of four forms
 for _form in ("none", "episodic", "lessons", "map"):
     BUILDERS[f"A10-{_form}"] = functools.partial(build_a9, choice=_form)
+# A10r: A9 with the push skill as a way to recover; the form is what the model is shown to decide when to push
+for _form in ("none", "told", "episodic", "lessons", "map"):
+    BUILDERS[f"A10r-{_form}"] = functools.partial(build_a9, recover=_form)
 A9_PARTS = ("single", "prior", "stale", "doubt", "fingers", "guards")
 for _part in A9_PARTS:                                    # A9 with exactly one part removed
     BUILDERS[f"A9-{_part}"] = functools.partial(build_a9, off=frozenset({_part}))

@@ -92,8 +92,13 @@ class FrozenSkillExecutor:
         home_jitter: float = 0.02,
         stack_standoff: float = 0.08,
         align: bool = True,
+        push_policy_path: Optional[str] = None,
     ) -> None:
         self.env = env
+        # A second frozen skill, trained on single-object PandaPush: it slides a block over the
+        # table with the fingers closed.  None keeps the executor as it was (push() below then
+        # still drives the pick-and-place policy).
+        self.push_policy = _load_policy(push_policy_path) if push_policy_path else None
         # The skill only ever started an episode from the neutral pose.  Chaining
         # calls starts it from wherever the last one ended (low, over a zone),
         # which is out of distribution.  retract=True returns the open gripper to
@@ -217,9 +222,10 @@ class FrozenSkillExecutor:
             "q_trace": q_trace,
         }
 
-    def _go_home(self, max_steps: int = 40) -> None:
+    def _go_home(self, max_steps: int = 40, grip: float = 1.0) -> None:
         """Scripted, open-fingered return to the start pose: release, rise, then
-        translate.  Not a skill call and makes no claim."""
+        translate.  Not a skill call and makes no claim.  grip=-1 closes the fingers
+        on arrival, which is how the push skill starts."""
         robot, sim = self.env.robot, self.env.sim
         for _ in range(3):
             robot.set_action(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)); sim.step()
@@ -236,6 +242,8 @@ class FrozenSkillExecutor:
                 break
             d = np.clip((target - ee) / 0.05, -1.0, 1.0)
             robot.set_action(np.array([d[0], d[1], d[2], 1.0], dtype=np.float32)); sim.step()
+        for _ in range(6 if grip < 0 else 0):               # close only once the hand is up and away
+            robot.set_action(np.array([0.0, 0.0, 0.0, grip], dtype=np.float32)); sim.step()
 
     def _align(self, goal: np.ndarray, max_steps: int = 30) -> None:
         """Scripted final approach: with the fingers left closed, centre the
@@ -344,14 +352,29 @@ class FrozenSkillExecutor:
         return {"ok": True, "claimed_success": claimed, "_truth": bool(truth), "_info": info}
 
     def push(self, obj: str, direction: str, distance: float) -> Dict[str, Any]:
+        """Move a block over the table by `distance` along an axis, or toward the middle of
+        the workspace ("center").  With a push skill loaded this is that skill (push_to);
+        without one it is the pick-and-place skill sent to a table goal, as before."""
         if obj not in self.env.object_names:
             return {"ok": False, "error": f"unknown object {obj!r}; args need \"obj\", one of {list(self.env.object_names)}"}
-        if direction not in DIRECTIONS:
-            return {"ok": False, "error": f"direction must be one of {list(DIRECTIONS)}"}
+        if direction not in DIRECTIONS and direction != "center":
+            return {"ok": False, "error": f"direction must be one of {list(DIRECTIONS) + ['center']}"}
         distance = float(np.clip(distance, 0.0, 0.15))
         start = np.asarray(self.env.sim.get_base_position(obj), dtype=float)
-        goal = (start + DIRECTIONS[direction] * distance).astype(np.float32)
+        if direction == "center":
+            r = float(np.linalg.norm(start[:2]))
+            unit = np.array([-start[0] / r, -start[1] / r, 0.0]) if r > 1e-6 else np.zeros(3)
+            distance = min(distance, r)                      # never past the middle
+        else:
+            unit = DIRECTIONS[direction]
+        goal = (start + unit * distance).astype(np.float32)
         goal[2] = OBJECT_SIZE / 2
+        if self.push_policy is not None:
+            fence = float(getattr(self.env.task, "fence", 0.0) or 0.0)
+            if fence:                                        # a goal the rim allows the block to reach
+                lim = fence - OBJECT_SIZE / 2 - 0.01
+                goal[:2] = np.clip(goal[:2], -lim, lim)
+            return self.push_to(obj, goal[:2])
         claimed, info = self._run(obj, goal, self._ee_at(goal))
         now = np.asarray(self.env.sim.get_base_position(obj), dtype=float)
         moved = float(np.linalg.norm(now[:2] - start[:2]))
@@ -359,3 +382,33 @@ class FrozenSkillExecutor:
         # the push counts only if the block ended up near where it was sent
         truth = bool(np.linalg.norm(now[:2] - goal[:2]) < REACH_TOL)
         return {"ok": True, "claimed_success": claimed, "_truth": truth, "_info": info}
+
+    def push_to(self, obj: str, xy, steps: int = 50) -> Dict[str, Any]:
+        """The push skill: slide `obj` over the table to the point `xy`, fingers closed.
+
+        Runs the push policy for its training horizon and then lifts the hand clear.  The
+        claim is only that the motion was executed; `_truth` says whether the block ended
+        within the skill's training tolerance of the point."""
+        if obj not in self.env.object_names:
+            return {"ok": False, "error": f"unknown object {obj!r}; args need \"obj\", one of {list(self.env.object_names)}"}
+        if self.push_policy is None:
+            return {"ok": False, "error": "no push skill is loaded"}
+        sim, robot = self.env.sim, self.env.robot
+        if self.retract:
+            self._go_home(grip=-1.0)
+        goal = np.array([float(xy[0]), float(xy[1]), OBJECT_SIZE / 2], dtype=np.float32)
+        start = np.asarray(sim.get_base_position(obj), dtype=float)
+        for _ in range(steps):
+            pos = np.asarray(sim.get_base_position(obj), dtype=np.float32)
+            obs = {"observation": np.concatenate([
+                       robot.get_obs()[:6], pos, self._canonical_rotation(obj),
+                       sim.get_base_velocity(obj), sim.get_base_angular_velocity(obj)]).astype(np.float32),
+                   "achieved_goal": pos, "desired_goal": goal}
+            action, _ = self.push_policy.predict(obs, deterministic=True)
+            robot.set_action(np.array([action[0], action[1], action[2], -1.0], dtype=np.float32)); sim.step()
+        for _ in range(8):                                   # straight up, off the block
+            robot.set_action(np.array([0.0, 0.0, 1.0, -1.0], dtype=np.float32)); sim.step()
+        now = np.asarray(sim.get_base_position(obj), dtype=float)
+        info = {"moved": round(float(np.linalg.norm(now[:2] - start[:2])), 4),
+                "obj_goal_dist": round(float(np.linalg.norm(now[:2] - goal[:2])), 4)}
+        return {"ok": True, "claimed_success": True, "_truth": bool(info["obj_goal_dist"] < REACH_TOL), "_info": info}

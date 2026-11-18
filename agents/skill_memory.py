@@ -16,6 +16,11 @@ which blocks to use:
             learned from (it saw that episode's records)
   map       for each candidate block, how often earlier picks near that spot
             worked: counted by code, not by the model
+
+The same records also answer a second question (`recover_notes`): after an attempt
+on a block has failed, is it better to pick it again where it lies, or to push it
+toward the middle of the table first?  A pick that followed a push is stored with
+where the block was before the push, so the two ways can be compared for one spot.
 """
 import json
 import math
@@ -26,6 +31,8 @@ MODES = ("none", "episodic", "lessons", "map")
 SIGMA_CM = 2.5          # width of "near that spot"
 OTHER_HISTORY = 0.25    # weight of a record whose block had a different history (fresh / just failed)
 RECENT = 24             # how many records the episodic form shows
+SIGMA_RETRY_CM = 5.0    # "near that spot" for retries, of which there are far fewer than first picks
+FAILED = ("failed pick", "failed place")
 MAX_LESSONS = 6
 
 GEOMETRY = ("Positions are in cm. x points away from the robot and y to its left. The workspace is a square "
@@ -34,7 +41,7 @@ GEOMETRY = ("Positions are in cm. x points away from the robot and y to its left
 
 LESSON_SYSTEM = """You keep a short list of lessons about a robot arm's pick-and-place skill. The skill is \
 unreliable: some picks fail. After each episode you see what was tried and how it went, and you update the list \
-so that a later episode can choose blocks that the robot handles well.
+so that a later episode can choose blocks that the robot handles well and knows what to do after an attempt has failed.
 
 """ + GEOMETRY + """
 
@@ -46,6 +53,11 @@ Keep earlier lessons that still hold, correct the ones the new episode contradic
 
 
 def describe(rec: Dict[str, Any]) -> str:
+    if rec["tool"] == "pick" and rec.get("prev") == "pushed":
+        frm = f" from ({rec['fx']:+.1f}, {rec['fy']:+.1f})" if rec.get("fx") is not None else ""
+        why = {"failed pick": " after a failed pick", "failed place": " after its placement had failed"}.get(rec.get("why"), "")
+        return (f"pick of a block at ({rec['x']:+.1f}, {rec['y']:+.1f}) right after it was pushed toward the center"
+                f"{frm}{why}: " + ("worked" if rec["ok"] else "FAILED"))
     if rec["tool"] == "pick":
         after = {"failed pick": " right after a failed pick of the same block",
                  "failed place": " after its placement had failed", "placed": " (it had been placed before)"}
@@ -135,3 +147,49 @@ class SkillMemory:
         total = sum(r["tool"] == "pick" for r in self.records)
         return (f"SKILL RECORD (counted by the system from {total} picks in earlier episodes; it covers picking a "
                 "block up, not putting it down):\n" + "\n".join(rows))
+
+    # ------------------------------------------------- after a failure: again, or push first
+    def retries(self, x: Optional[float] = None, y: Optional[float] = None) -> Dict[str, Tuple[float, float]]:
+        """{"again": (n, k), "push": (n, k)}: picks of a block whose last attempt had failed,
+        made where it lay ("again") or after a push toward the center ("push").  With a
+        position, a kernel count around that spot (for "push": around where the block lay
+        before it was pushed); without one, plain counts."""
+        out = {"again": [0.0, 0.0], "push": [0.0, 0.0]}
+        for r in self.records:
+            if r["tool"] != "pick":
+                continue
+            if r.get("prev") in FAILED:
+                key, px, py = "again", r["x"], r["y"]
+            elif r.get("prev") == "pushed" and r.get("fx") is not None:
+                key, px, py = "push", r["fx"], r["fy"]
+            else:
+                continue
+            w = 1.0 if x is None else math.exp(-((px - x) ** 2 + (py - y) ** 2) / (2 * SIGMA_RETRY_CM ** 2))
+            out[key][0] += w
+            out[key][1] += w * bool(r["ok"])
+        return {k: (v[0], v[1]) for k, v in out.items()}
+
+    def recover_notes(self, mode: str, block: str, xy: Optional[Tuple[float, float]], last: str) -> str:
+        """What the model is shown when a block's last attempt has failed and it may push it."""
+        if mode in ("none", "told"):
+            return ""
+        if mode == "lessons":
+            return ("LESSONS (you wrote these after earlier episodes):\n"
+                    + "\n".join(f"  - {x}" for x in self.lessons)) if self.lessons else ""
+        tried = [r for r in self.records if r["tool"] == "pick" and (r.get("prev") in FAILED or r.get("prev") == "pushed")]
+        if not tried:
+            return ""
+        if mode == "episodic":
+            return ("EARLIER RETRIES (picks of a block whose last attempt had failed; the most recent ones from "
+                    "earlier episodes, as they happened; positions in cm, the workspace runs from -19 to 19):\n"
+                    + "\n".join(f"  {describe(r)}" for r in tried[-RECENT:]))
+        allr = self.retries()
+        near = self.retries(*xy) if xy else None
+        line = lambda key: (f"worked in {allr[key][1]:.0f} of {allr[key][0]:.0f} cases" if allr[key][0] else "never tried") + (   # noqa: E731
+            f" (for blocks that lay near this spot: {near[key][1]:.0f} of {near[key][0]:.0f})"
+            if near and near[key][0] >= 2.0 else "")
+        return (f"SKILL RECORD for {block} (counted by the system from earlier episodes, for blocks whose last attempt "
+                "had failed):\n"
+                f"  picking it again where it lies: {line('again')}\n"
+                f"  pushing it first and then picking it: the pick {line('push')}")
+

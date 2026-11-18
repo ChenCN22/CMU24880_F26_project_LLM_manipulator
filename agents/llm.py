@@ -25,6 +25,7 @@ class Usage:
     prompt_tokens: int = 0
     output_tokens: int = 0
     seconds: float = 0.0
+    cached_tokens: int = 0      # prompt tokens the provider billed at its cached rate (OpenAI)
     malformed: int = 0          # responses that were not usable JSON
     repairs: int = 0            # retries that then parsed
 
@@ -34,6 +35,7 @@ class Usage:
             "prompt_tokens": self.prompt_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.prompt_tokens + self.output_tokens,
+            "cached_tokens": self.cached_tokens,
             "llm_seconds": round(self.seconds, 2),
             "malformed_json": self.malformed,
             "json_repairs": self.repairs,
@@ -58,6 +60,13 @@ class LLMBackbone:
     # behave differently only from the point where their prompts differ.
     cache_path: Optional[str] = None
     _cache: Optional[Dict[str, Any]] = None
+    # Models that can "think" before they answer are run with thinking off (False), so every
+    # model answers within the same num_predict; None leaves the request as it always was.
+    think: Optional[bool] = None
+    last_error: str = ""
+    # A model named "openai:<id>" is asked through the OpenAI API (key in OPENAI_API_KEY);
+    # `effort` is its reasoning effort, "none" being the counterpart of think=False.
+    effort: str = "none"
 
     def _load_cache(self) -> Dict[str, Any]:
         if self._cache is None:
@@ -80,6 +89,31 @@ class LLMBackbone:
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             return json.load(r)
 
+    def _openai(self, messages: List[Dict[str, str]], schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """One call to the OpenAI chat API, returned in the shape of an Ollama reply."""
+        fmt = ({"type": "json_schema", "json_schema": {"name": "reply", "schema": schema, "strict": False}}
+               if schema else {"type": "json_object"})
+        body = {"model": self.model.split(":", 1)[1], "messages": messages, "response_format": fmt,
+                "max_completion_tokens": self.num_predict, "seed": self.seed}
+        if self.effort:
+            body["reasoning_effort"] = self.effort
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["OPENAI_API_KEY"]})
+        for wait in (2, 8, 30, None):                       # rate limits and server errors are retried
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    out = json.load(r)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code not in (429, 500, 502, 503, 504) or wait is None:
+                    raise urllib.error.URLError(f"OpenAI {e.code}: {e.read()[:300]!r}")
+                time.sleep(wait)
+        use = out.get("usage") or {}
+        return {"message": {"content": out["choices"][0]["message"].get("content") or ""},
+                "prompt_eval_count": use.get("prompt_tokens", 0), "eval_count": use.get("completion_tokens", 0),
+                "cached_tokens": (use.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}
+
     def chat_json(self, messages: List[Dict[str, str]],
                   retries: int = 2, schema: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """One constrained-decoding call.  Returns a parsed object, or None if
@@ -99,17 +133,22 @@ class LLMBackbone:
                 "seed": self.seed,
             },
         }
+        if self.think is not None:
+            body["think"] = self.think
+        remote = self.model.startswith("openai:")
         key = None
         if self.cache_path:
-            key = hashlib.sha256(json.dumps(
-                [self.model, self.temperature, self.seed, self.num_ctx, self.num_predict, schema, messages],
-                sort_keys=True).encode()).hexdigest()
+            ident = [self.model, self.temperature, self.seed, self.num_ctx, self.num_predict, schema, messages]
+            if self.think is not None or remote:            # earlier cache files keep their keys
+                ident.append({"think": self.think, "effort": self.effort if remote else None})
+            key = hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()
             hit = self._load_cache().get(key)
             if hit is not None:
                 self.usage.calls += 1
                 self.usage.prompt_tokens += hit["pt"]
                 self.usage.output_tokens += hit["ot"]
                 self.usage.seconds += hit["sec"]
+                self.usage.cached_tokens += hit.get("ct", 0)
                 entry = {"out": hit["out"]}
                 if self.keep_messages:
                     entry["messages"] = messages
@@ -120,8 +159,9 @@ class LLMBackbone:
             body["messages"] = attempt_msgs
             t0 = time.time()
             try:
-                r = self._post("/api/chat", body)
+                r = self._openai(attempt_msgs, schema) if remote else self._post("/api/chat", body)
             except (urllib.error.URLError, TimeoutError) as e:
+                self.last_error = str(e)
                 self.usage.calls += 1
                 self.usage.seconds += time.time() - t0
                 self.usage.malformed += 1
@@ -132,6 +172,7 @@ class LLMBackbone:
             self.usage.seconds += time.time() - t0
             self.usage.prompt_tokens += int(r.get("prompt_eval_count", 0))
             self.usage.output_tokens += int(r.get("eval_count", 0))
+            self.usage.cached_tokens += int(r.get("cached_tokens", 0))
             text = (r.get("message") or {}).get("content", "")
             try:
                 obj = json.loads(text)
@@ -144,6 +185,8 @@ class LLMBackbone:
                 if key is not None and attempt == 0:
                     rec = {"key": key, "out": obj, "pt": int(r.get("prompt_eval_count", 0)),
                            "ot": int(r.get("eval_count", 0)), "sec": round(time.time() - t0, 3)}
+                    if r.get("cached_tokens"):
+                        rec["ct"] = int(r["cached_tokens"])
                     self._cache[key] = rec
                     with open(self.cache_path, "a") as f:
                         f.write(json.dumps(rec) + "\n")

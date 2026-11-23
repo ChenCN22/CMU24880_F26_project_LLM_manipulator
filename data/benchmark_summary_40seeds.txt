@@ -1,0 +1,310 @@
+
+=== script: successes / episodes, seeds 2000-2039
+
+agent   stated, camera right  stated, one bad camera  free  ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+naive   78/120                78/120                  -     32/40                  24/40                      22/40                      32/40                    24/40                        22/40                        -               -                 -           -              
+trust   102/120               86/120                  -     37/40                  34/40                      31/40                      31/40                    30/40                        25/40                        -               -                 -           -              
+vote    102/120               95/120                  -     37/40                  34/40                      31/40                      35/40                    32/40                        28/40                        -               -                 -           -              
+oracle  102/120               102/120                 -     37/40                  34/40                      31/40                      37/40                    34/40                        31/40                        -               -                 -           -              
+
+=== qwen2.5:14b: successes / episodes, seeds 2000-2039
+
+agent        stated, camera right  stated, one bad camera  free     ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2           103/120               92/120                  89/160   38/40                  34/40                      31/40                      36/40                    31/40                        25/40                        33/40           16/40             38/40       2/40           
+A5           101/120               92/120                  96/160   36/40                  34/40                      31/40                      32/40                    30/40                        30/40                        31/40           26/40             38/40       1/40           
+A9           102/120               95/120                  84/160   37/40                  34/40                      31/40                      35/40                    33/40                        27/40                        28/40           16/40             30/40       10/40          
+A10r-none    115/120               106/120                 86/160   38/40                  39/40                      38/40                      36/40                    34/40                        36/40                        36/40           28/40             7/40        15/40          
+A10-none     103/120               96/120                  134/160  37/40                  35/40                      31/40                      35/40                    34/40                        27/40                        40/40           36/40             39/40       19/40          
+A11-none     104/120               100/120                 135/160  37/40                  35/40                      32/40                      35/40                    34/40                        31/40                        39/40           34/40             39/40       23/40          
+A11-lessons  105/120               100/120                 140/160  37/40                  35/40                      33/40                      35/40                    34/40                        31/40                        39/40           35/40             40/40       26/40          
+
+tasks                   difference              points [95% interval]       
+free, camera right      A10-none - A9           +31.2 [+23.1, +39.4] (n=160)
+free, camera right      A10-none - A2           +28.1 [+20.6, +35.6] (n=160)
+free, camera right      A9 - A2                 -3.1 [-11.9, +5.6] (n=160)  
+free, camera right      A11-lessons - A11-none  +3.1 [-1.2, +8.1] (n=160)   
+free, camera right      A11-lessons - A10-none  +3.8 [-1.9, +9.4] (n=160)   
+stated, camera right    A9 - A2                 -0.8 [-6.7, +4.2] (n=120)   
+stated, camera right    A10r-none - A9          +10.8 [+5.0, +16.7] (n=120) 
+stated, camera right    A10-none - A9           +0.8 [-2.5, +4.2] (n=120)   
+stated, camera one bad  A9 - A2                 +2.5 [-3.3, +8.3] (n=120)   
+stated, camera one bad  A9 - A5                 +2.5 [-4.2, +9.2] (n=120)   
+stated, camera one bad  A5 - A2                 +0.0 [-6.7, +6.7] (n=120)   
+stated, camera one bad  A10r-none - A9          +9.2 [+2.5, +15.8] (n=120)  
+stated, camera one bad  A11-lessons - A9        +4.2 [+0.8, +8.3] (n=120)   
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent        stated, camera right       stated, one bad camera     free                      
+A2           10.6 / 10.6 / 12282 / 458  10.0 / 10.0 / 11616 / 429  24.4 / 24.4 / 38309 / 1093
+A5           13.8 / 10.3 / 16844 / 424  16.1 / 10.5 / 18140 / 451  24.9 / 18.2 / 46647 / 763 
+A9           11.3 / 6.6 / 3542 / 234    11.4 / 6.3 / 3329 / 221    21.5 / 11.9 / 7353 / 465  
+A10r-none    13.7 / 7.2 / 4169 / 256    13.2 / 6.8 / 3874 / 240    28.2 / 13.2 / 8717 / 514  
+A10-none     13.4 / 9.8 / 5160 / 364    13.3 / 9.5 / 4926 / 350    18.2 / 12.5 / 7152 / 462  
+A11-none     13.3 / 9.8 / 5368 / 365    13.4 / 9.4 / 5110 / 345    18.2 / 12.5 / 8358 / 459  
+A11-lessons  12.9 / 9.4 / 5282 / 340    13.2 / 9.3 / 5242 / 336    17.3 / 11.8 / 8081 / 434  
+
+=== gemma3:12b: successes / episodes, seeds 2000-2039
+
+agent        stated, camera right  stated, one bad camera  free    ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2           91/120                70/120                  40/100  33/40                  32/40                      26/40                      26/40                    23/40                        21/40                        17/25           3/25              20/25       0/25           
+A5           91/120                88/120                  40/100  34/40                  31/40                      26/40                      34/40                    27/40                        27/40                        15/25           7/25              18/25       0/25           
+A9           104/120               96/120                  53/100  37/40                  33/40                      34/40                      35/40                    31/40                        30/40                        22/25           12/25             19/25       0/25           
+A10r-none    74/75                 68/75                   -       24/25                  25/25                      25/25                      22/25                    22/25                        24/25                        -               -                 -           -              
+A10-none     67/75                 65/75                   72/100  23/25                  23/25                      21/25                      22/25                    23/25                        20/25                        25/25           22/25             25/25       0/25           
+A11-none     67/75                 66/75                   72/100  23/25                  23/25                      21/25                      22/25                    23/25                        21/25                        24/25           25/25             23/25       0/25           
+A11-lessons  67/75                 64/75                   71/100  23/25                  23/25                      21/25                      21/25                    23/25                        20/25                        24/25           22/25             25/25       0/25           
+
+tasks                   difference              points [95% interval]       
+free, camera right      A10-none - A9           +19.0 [+12.0, +27.0] (n=100)
+free, camera right      A10-none - A2           +32.0 [+23.0, +41.0] (n=100)
+free, camera right      A9 - A2                 +13.0 [+3.0, +23.0] (n=100) 
+free, camera right      A11-lessons - A11-none  -1.0 [-6.0, +4.0] (n=100)   
+free, camera right      A11-lessons - A10-none  -1.0 [-3.0, +0.0] (n=100)   
+stated, camera right    A9 - A2                 +10.8 [+5.0, +17.5] (n=120) 
+stated, camera right    A10r-none - A9          +10.7 [+4.0, +17.3] (n=75)  
+stated, camera right    A10-none - A9           +1.3 [-2.7, +5.3] (n=75)    
+stated, camera one bad  A9 - A2                 +21.7 [+14.2, +29.2] (n=120)
+stated, camera one bad  A9 - A5                 +6.7 [+1.7, +12.5] (n=120)  
+stated, camera one bad  A5 - A2                 +15.0 [+7.5, +22.5] (n=120) 
+stated, camera one bad  A10r-none - A9          +9.3 [+1.3, +17.3] (n=75)   
+stated, camera one bad  A11-lessons - A9        +4.0 [-1.3, +9.3] (n=75)    
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent        stated, camera right       stated, one bad camera     free                      
+A2           14.6 / 14.6 / 18634 / 720  16.1 / 16.1 / 20687 / 780  25.5 / 25.5 / 33704 / 1516
+A5           14.8 / 13.1 / 22292 / 632  14.8 / 12.2 / 22137 / 611  27.4 / 25.8 / 43853 / 1414
+A9           11.5 / 6.6 / 3727 / 290    11.7 / 6.4 / 3572 / 278    15.4 / 8.5 / 5295 / 435   
+A10r-none    14.1 / 7.6 / 4674 / 335    13.6 / 7.0 / 4277 / 309    -                         
+A10-none     13.4 / 9.9 / 5434 / 436    13.6 / 9.5 / 5223 / 420    11.7 / 9.2 / 5203 / 447   
+A11-none     13.3 / 9.7 / 5542 / 432    13.5 / 9.4 / 5346 / 420    11.2 / 9.0 / 6485 / 428   
+A11-lessons  13.4 / 10.0 / 5995 / 445   13.5 / 9.6 / 5735 / 428    11.5 / 9.1 / 6846 / 441   
+
+=== llama3.1:8b: successes / episodes, seeds 2000-2039
+
+agent        stated, camera right  stated, one bad camera  free    ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2           54/120                50/120                  36/100  12/40                  21/40                      21/40                      13/40                    22/40                        15/40                        9/25            13/25             14/25       0/25           
+A5           63/120                58/120                  28/100  23/40                  20/40                      20/40                      20/40                    23/40                        15/40                        11/25           5/25              11/25       1/25           
+A9           67/120                65/120                  28/100  16/40                  24/40                      27/40                      15/40                    24/40                        26/40                        14/25           6/25              8/25        0/25           
+A10r-none    49/75                 46/75                   -       12/25                  21/25                      16/25                      11/25                    20/25                        15/25                        -               -                 -           -              
+A10-none     66/75                 61/75                   62/100  22/25                  24/25                      20/25                      20/25                    23/25                        18/25                        24/25           20/25             18/25       0/25           
+A11-none     67/75                 63/75                   50/100  23/25                  24/25                      20/25                      21/25                    23/25                        19/25                        24/25           21/25             5/25        0/25           
+A11-lessons  66/75                 63/75                   47/100  23/25                  23/25                      20/25                      21/25                    23/25                        19/25                        23/25           20/25             4/25        0/25           
+
+tasks                   difference              points [95% interval]       
+free, camera right      A10-none - A9           +34.0 [+24.0, +44.0] (n=100)
+free, camera right      A10-none - A2           +26.0 [+15.0, +37.0] (n=100)
+free, camera right      A9 - A2                 -8.0 [-21.0, +5.0] (n=100)  
+free, camera right      A11-lessons - A11-none  -3.0 [-11.0, +5.0] (n=100)  
+free, camera right      A11-lessons - A10-none  -15.0 [-24.0, -6.0] (n=100) 
+stated, camera right    A9 - A2                 +10.8 [+0.8, +20.8] (n=120) 
+stated, camera right    A10r-none - A9          +6.7 [-5.3, +18.7] (n=75)   
+stated, camera right    A10-none - A9           +29.3 [+18.7, +41.3] (n=75) 
+stated, camera one bad  A9 - A2                 +12.5 [+1.7, +23.3] (n=120) 
+stated, camera one bad  A9 - A5                 +5.8 [-6.7, +18.3] (n=120)  
+stated, camera one bad  A5 - A2                 +6.7 [-5.0, +17.5] (n=120)  
+stated, camera one bad  A10r-none - A9          +4.0 [-8.0, +16.0] (n=75)   
+stated, camera one bad  A11-lessons - A9        +26.7 [+16.0, +37.3] (n=75) 
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent        stated, camera right         stated, one bad camera       free                       
+A2           37.6 / 37.6 / 111530 / 1382  37.1 / 37.1 / 107461 / 1353  39.7 / 39.7 / 81837 / 1385 
+A5           32.5 / 22.6 / 85835 / 796    34.1 / 19.9 / 73734 / 699    40.0 / 32.9 / 106597 / 1130
+A9           15.4 / 11.0 / 6537 / 422     15.8 / 11.0 / 6498 / 420     25.7 / 16.0 / 10681 / 594  
+A10r-none    17.5 / 11.4 / 7264 / 454     18.0 / 11.1 / 7006 / 439     -                          
+A10-none     13.3 / 10.2 / 5375 / 357     13.8 / 10.2 / 5368 / 356     19.2 / 17.3 / 10435 / 833  
+A11-none     13.2 / 10.0 / 5407 / 342     14.1 / 10.0 / 5465 / 344     27.0 / 31.5 / 32320 / 1739 
+A11-lessons  13.3 / 10.2 / 5773 / 355     13.5 / 9.9 / 5588 / 345      28.0 / 31.4 / 34078 / 1711 
+
+=== qwen3.8:27b: successes / episodes, seeds 2000-2039
+
+agent        stated, camera right  stated, one bad camera  free    ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2           105/120               55/120                  79/100  37/40                  35/40                      33/40                      26/40                    17/40                        12/40                        23/25           24/25             23/25       9/25           
+A5           105/120               76/120                  80/100  37/40                  35/40                      33/40                      31/40                    25/40                        20/40                        23/25           23/25             25/25       9/25           
+A9           105/120               99/120                  67/100  37/40                  35/40                      33/40                      35/40                    34/40                        30/40                        19/25           16/25             24/25       8/25           
+A10r-none    70/75                 66/75                   -       23/25                  25/25                      22/25                      22/25                    24/25                        20/25                        -               -                 -           -              
+A10-none     67/75                 61/75                   85/100  23/25                  23/25                      21/25                      20/25                    23/25                        18/25                        24/25           20/25             25/25       16/25          
+A11-none     67/75                 63/75                   85/100  23/25                  23/25                      21/25                      21/25                    23/25                        19/25                        24/25           23/25             23/25       15/25          
+A11-lessons  69/75                 63/75                   82/100  23/25                  23/25                      23/25                      21/25                    23/25                        19/25                        24/25           21/25             24/25       13/25          
+
+tasks                   difference              points [95% interval]       
+free, camera right      A10-none - A9           +18.0 [+8.0, +28.0] (n=100) 
+free, camera right      A10-none - A2           +6.0 [-3.0, +15.0] (n=100)  
+free, camera right      A9 - A2                 -12.0 [-22.0, -2.0] (n=100) 
+free, camera right      A11-lessons - A11-none  -3.0 [-10.0, +4.0] (n=100)  
+free, camera right      A11-lessons - A10-none  -3.0 [-12.0, +6.0] (n=100)  
+stated, camera right    A9 - A2                 +0.0 [-2.5, +2.5] (n=120)   
+stated, camera right    A10r-none - A9          +4.0 [-1.3, +9.3] (n=75)    
+stated, camera right    A10-none - A9           +0.0 [+0.0, +0.0] (n=75)    
+stated, camera one bad  A9 - A2                 +36.7 [+27.5, +45.8] (n=120)
+stated, camera one bad  A9 - A5                 +19.2 [+11.7, +26.7] (n=120)
+stated, camera one bad  A5 - A2                 +17.5 [+7.5, +27.5] (n=120) 
+stated, camera one bad  A10r-none - A9          +2.7 [+0.0, +6.7] (n=75)    
+stated, camera one bad  A11-lessons - A9        -1.3 [-6.7, +2.7] (n=75)    
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent        stated, camera right      stated, one bad camera    free                     
+A2           9.4 / 9.4 / 11527 / 416   6.5 / 6.5 / 7143 / 286    16.7 / 16.7 / 27255 / 784
+A5           12.9 / 9.4 / 19650 / 415  13.6 / 8.1 / 17123 / 388  23.4 / 16.8 / 49622 / 773
+A9           11.6 / 6.3 / 3461 / 250   11.9 / 6.3 / 3442 / 247   16.6 / 8.4 / 5024 / 361  
+A10r-none    13.0 / 6.7 / 3994 / 268   13.5 / 6.7 / 3951 / 265   -                        
+A10-none     13.4 / 9.3 / 4927 / 409   13.6 / 9.5 / 5082 / 421   18.8 / 12.9 / 7731 / 629 
+A11-none     13.3 / 9.3 / 5117 / 399   13.9 / 9.4 / 5188 / 407   18.9 / 12.9 / 9420 / 620 
+A11-lessons  13.1 / 9.1 / 5171 / 391   14.0 / 9.4 / 5437 / 414   17.4 / 12.1 / 8747 / 589 
+
+=== deepseek-r1:32b: successes / episodes, seeds 2000-2039
+
+agent        stated, camera right  stated, one bad camera  free    ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2           95/120                71/120                  60/100  37/40                  33/40                      25/40                      31/40                    29/40                        11/40                        14/25           17/25             25/25       4/25           
+A5           97/120                69/120                  59/100  38/40                  32/40                      27/40                      36/40                    24/40                        9/40                         16/25           20/25             22/25       1/25           
+A9           103/120               99/120                  49/100  37/40                  35/40                      31/40                      35/40                    33/40                        31/40                        16/25           15/25             14/25       4/25           
+A10r-none    69/75                 63/75                   -       24/25                  23/25                      22/25                      22/25                    21/25                        20/25                        -               -                 -           -              
+A10-none     65/75                 62/75                   82/100  23/25                  21/25                      21/25                      20/25                    22/25                        20/25                        24/25           21/25             25/25       12/25          
+A11-none     67/75                 64/75                   85/100  23/25                  23/25                      21/25                      20/25                    23/25                        21/25                        25/25           22/25             25/25       13/25          
+A11-lessons  65/75                 63/75                   84/100  23/25                  23/25                      19/25                      20/25                    23/25                        20/25                        25/25           21/25             25/25       13/25          
+
+tasks                   difference              points [95% interval]       
+free, camera right      A10-none - A9           +33.0 [+22.0, +44.0] (n=100)
+free, camera right      A10-none - A2           +22.0 [+11.0, +33.0] (n=100)
+free, camera right      A9 - A2                 -11.0 [-24.0, +2.0] (n=100) 
+free, camera right      A11-lessons - A11-none  -1.0 [-7.0, +5.0] (n=100)   
+free, camera right      A11-lessons - A10-none  +2.0 [-5.0, +9.0] (n=100)   
+stated, camera right    A9 - A2                 +6.7 [+1.7, +12.5] (n=120)  
+stated, camera right    A10r-none - A9          +5.3 [+0.0, +12.0] (n=75)   
+stated, camera right    A10-none - A9           +0.0 [-5.3, +5.3] (n=75)    
+stated, camera one bad  A9 - A2                 +23.3 [+15.8, +31.7] (n=120)
+stated, camera one bad  A9 - A5                 +25.0 [+16.7, +33.3] (n=120)
+stated, camera one bad  A5 - A2                 -1.7 [-10.0, +6.7] (n=120)  
+stated, camera one bad  A10r-none - A9          +0.0 [-6.7, +6.7] (n=75)    
+stated, camera one bad  A11-lessons - A9        +0.0 [-5.3, +5.3] (n=75)    
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent        stated, camera right       stated, one bad camera     free                      
+A2           11.3 / 11.3 / 16974 / 749  9.8 / 9.8 / 13662 / 644    17.5 / 17.6 / 35189 / 1391
+A5           14.4 / 10.2 / 22268 / 664  21.9 / 12.2 / 35881 / 879  22.5 / 18.2 / 53333 / 1363
+A9           11.5 / 6.4 / 3724 / 392    11.7 / 6.3 / 3626 / 387    23.8 / 13.9 / 10992 / 978 
+A10r-none    13.1 / 7.0 / 4391 / 433    13.6 / 6.9 / 4355 / 434    -                         
+A10-none     13.7 / 10.6 / 6301 / 644   14.4 / 10.8 / 6469 / 660   18.1 / 12.7 / 7987 / 769  
+A11-none     13.1 / 10.0 / 6009 / 605   13.7 / 10.3 / 6227 / 622   17.6 / 11.7 / 8563 / 693  
+A11-lessons  13.3 / 10.1 / 6363 / 614   13.7 / 10.1 / 6471 / 615   18.3 / 12.2 / 9291 / 726  
+
+=== gpt-6-luna: successes / episodes, seeds 2000-2039
+
+agent  stated, camera right  stated, one bad camera  free  ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2     104/120               60/120                  -     37/40                  34/40                      33/40                      27/40                    19/40                        14/40                        -               -                 -           -              
+A5     104/120               73/120                  -     37/40                  34/40                      33/40                      31/40                    25/40                        17/40                        -               -                 -           -              
+A9     105/120               99/120                  -     37/40                  35/40                      33/40                      35/40                    34/40                        30/40                        -               -                 -           -              
+
+tasks                   difference  points [95% interval]       
+stated, camera right    A9 - A2     +0.8 [-1.7, +4.2] (n=120)   
+stated, camera one bad  A9 - A2     +32.5 [+23.3, +41.7] (n=120)
+stated, camera one bad  A9 - A5     +21.7 [+14.2, +30.0] (n=120)
+stated, camera one bad  A5 - A2     +10.8 [+0.0, +21.7] (n=120) 
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent  stated, camera right      stated, one bad camera    free
+A2     9.7 / 9.7 / 12008 / 416   6.9 / 6.9 / 7964 / 295    -   
+A5     12.9 / 9.4 / 19172 / 405  14.6 / 8.8 / 18827 / 390  -   
+A9     11.8 / 6.6 / 3869 / 247   12.0 / 6.5 / 3783 / 245   -   
+
+=== gpt-6.1-terra: successes / episodes, seeds 2000-2039
+
+agent  stated, camera right  stated, one bad camera  free  ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2     73/81                 29/81                   -     25/27                  24/27                      24/27                      10/27                    11/27                        8/27                         -               -                 -           -              
+A5     73/81                 58/81                   -     25/27                  24/27                      24/27                      21/27                    20/27                        17/27                        -               -                 -           -              
+A9     72/81                 69/81                   -     25/27                  24/27                      23/27                      23/27                    24/27                        22/27                        -               -                 -           -              
+
+tasks                   difference  points [95% interval]      
+stated, camera right    A9 - A2     -1.2 [-3.7, +0.0] (n=81)   
+stated, camera one bad  A9 - A2     +49.4 [+37.0, +60.5] (n=81)
+stated, camera one bad  A9 - A5     +13.6 [+6.2, +22.2] (n=81) 
+stated, camera one bad  A5 - A2     +35.8 [+24.7, +46.9] (n=81)
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent  stated, camera right      stated, one bad camera    free
+A2     9.3 / 9.3 / 10991 / 342   7.1 / 7.1 / 8488 / 266    -   
+A5     12.7 / 9.3 / 17105 / 341  15.1 / 9.3 / 20050 / 349  -   
+A9     12.1 / 6.5 / 3795 / 215   12.5 / 6.4 / 3737 / 211   -   
+
+=== gpt-6-sol: successes / episodes, seeds 2000-2039
+
+agent     stated, camera right  stated, one bad camera  free   ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2        -                     22/48                   55/64  -                      -                          -                          11/16                    6/16                         5/16                         15/16           13/16             16/16       11/16          
+A9        -                     41/48                   47/64  -                      -                          -                          14/16                    15/16                        12/16                        11/16           10/16             15/16       11/16          
+A10-none  -                     -                       59/64  -                      -                          -                          -                        -                            -                            16/16           15/16             16/16       12/16          
+
+tasks                   difference     points [95% interval]      
+free, camera right      A10-none - A9  +18.8 [+9.4, +29.7] (n=64) 
+free, camera right      A10-none - A2  +6.2 [-1.6, +14.1] (n=64)  
+free, camera right      A9 - A2        -12.5 [-21.9, -3.1] (n=64) 
+stated, camera one bad  A9 - A2        +39.6 [+25.0, +54.2] (n=48)
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent     stated, camera right  stated, one bad camera   free                     
+A2        -                     7.4 / 7.4 / 8725 / 295   14.6 / 14.6 / 23261 / 582
+A9        -                     12.0 / 6.2 / 3623 / 221  16.8 / 8.4 / 5297 / 297  
+A10-none  -                     -                        15.6 / 10.1 / 5967 / 356 
+
+=== claude-haiku-5-5: successes / episodes, seeds 2000-2039
+
+agent        stated, camera right  stated, one bad camera  free    ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2           69/75                 34/75                   82/100  24/25                  23/25                      22/25                      16/25                    11/25                        7/25                         22/25           22/25             25/25       13/25          
+A5           67/75                 52/75                   69/100  23/25                  23/25                      21/25                      20/25                    19/25                        13/25                        21/25           22/25             24/25       2/25           
+A9           67/75                 64/75                   54/100  23/25                  23/25                      21/25                      21/25                    23/25                        20/25                        18/25           18/25             10/25       8/25           
+A10r-none    69/75                 65/75                   -       23/25                  25/25                      21/25                      21/25                    24/25                        20/25                        -               -                 -           -              
+A10-none     67/75                 64/75                   87/100  23/25                  23/25                      21/25                      21/25                    23/25                        20/25                        25/25           23/25             25/25       14/25          
+A11-none     67/75                 64/75                   90/100  23/25                  23/25                      21/25                      21/25                    23/25                        20/25                        24/25           22/25             25/25       19/25          
+A11-lessons  67/75                 63/75                   94/100  23/25                  23/25                      21/25                      21/25                    23/25                        19/25                        25/25           25/25             25/25       19/25          
+
+tasks                   difference              points [95% interval]       
+free, camera right      A10-none - A9           +33.0 [+22.0, +44.0] (n=100)
+free, camera right      A10-none - A2           +5.0 [-4.0, +14.0] (n=100)  
+free, camera right      A9 - A2                 -28.0 [-38.0, -18.0] (n=100)
+free, camera right      A11-lessons - A11-none  +4.0 [-3.0, +11.0] (n=100)  
+free, camera right      A11-lessons - A10-none  +7.0 [+0.0, +15.0] (n=100)  
+stated, camera right    A9 - A2                 -2.7 [-6.7, +0.0] (n=75)    
+stated, camera right    A10r-none - A9          +2.7 [+0.0, +6.7] (n=75)    
+stated, camera right    A10-none - A9           +0.0 [+0.0, +0.0] (n=75)    
+stated, camera one bad  A9 - A2                 +40.0 [+28.0, +52.0] (n=75) 
+stated, camera one bad  A9 - A5                 +16.0 [+6.7, +25.3] (n=75)  
+stated, camera one bad  A5 - A2                 +24.0 [+12.0, +36.0] (n=75) 
+stated, camera one bad  A10r-none - A9          +1.3 [+0.0, +4.0] (n=75)    
+stated, camera one bad  A11-lessons - A9        -1.3 [-4.0, +0.0] (n=75)    
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent        stated, camera right       stated, one bad camera      free                      
+A2           10.4 / 10.4 / 22290 / 798  7.9 / 7.9 / 16369 / 612     16.9 / 16.9 / 43867 / 1415
+A5           13.3 / 9.5 / 30275 / 706   18.5 / 10.5 / 40816 / 903   23.3 / 16.4 / 70559 / 1304
+A9           12.1 / 6.5 / 7976 / 441    12.6 / 8.4 / 10513 / 614    24.3 / 12.5 / 17444 / 1131
+A10r-none    12.8 / 6.7 / 8639 / 464    13.2 / 9.4 / 12380 / 735    -                         
+A10-none     13.5 / 9.4 / 10845 / 679   14.0 / 13.1 / 15951 / 983   17.9 / 11.4 / 14082 / 912 
+A11-none     13.5 / 9.4 / 11133 / 684   14.0 / 13.1 / 16242 / 1025  17.1 / 11.4 / 15565 / 942 
+A11-lessons  13.5 / 9.4 / 11597 / 706   14.2 / 13.9 / 17812 / 1071  16.5 / 10.8 / 14823 / 862 
+
+=== claude-sonnet-5-5: successes / episodes, seeds 2000-2039
+
+agent     stated, camera right  stated, one bad camera  free    ordered_stack (right)  blocked_rearrange (right)  constrained_place (right)  ordered_stack (one bad)  blocked_rearrange (one bad)  constrained_place (one bad)  free_two_zones  free_three_zones  free_stack  free_two_stacks
+A2        -                     35/75                   86/100  -                      -                          -                          16/25                    12/25                        7/25                         24/25           23/25             25/25       14/25          
+A9        -                     63/75                   74/100  -                      -                          -                          21/25                    23/25                        19/25                        19/25           17/25             24/25       14/25          
+A10-none  -                     -                       91/100  -                      -                          -                          -                        -                            -                            24/25           25/25             25/25       17/25          
+
+tasks                   difference     points [95% interval]      
+free, camera right      A10-none - A9  +17.0 [+7.0, +27.0] (n=100)
+free, camera right      A10-none - A2  +5.0 [-2.0, +13.0] (n=100) 
+free, camera right      A9 - A2        -12.0 [-20.0, -4.0] (n=100)
+stated, camera one bad  A9 - A2        +37.3 [+25.3, +49.3] (n=75)
+
+per episode: tool calls / model calls / input tokens / output tokens
+
+agent     stated, camera right  stated, one bad camera   free                     
+A2        -                     7.8 / 7.8 / 15144 / 483  13.8 / 13.8 / 30662 / 868
+A9        -                     12.5 / 6.4 / 7882 / 391  16.8 / 8.4 / 10878 / 530 
+A10-none  -                     -                        16.9 / 11.1 / 13488 / 748

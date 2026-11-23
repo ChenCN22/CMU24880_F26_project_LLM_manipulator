@@ -39,7 +39,9 @@ A10 = A9 for tasks that leave the choice of blocks to the agent (build_a9 with
 `choice` set; see agents/skill_memory.py).  The model chooses the blocks from a
 layout with positions, and chooses again after every failed attempt; `choice`
 names the form in which the memory of earlier episodes reaches it.  Everything
-else is A9, and with choice=None nothing below differs from A9.
+else is A9, and with choice=None nothing below differs from A9.  An instruction that
+names its blocks is read as such (NAMED_FORMAT): the plan then has exactly the named
+placements and only their order is left to the model.
 
 A10r = A9 with the push skill as a way to recover (build_a9 with `recover` set).  The
 goals are read from the instruction as in A9.  After an attempt on a block has failed
@@ -48,6 +50,13 @@ the model may push the block toward the middle of the table before it picks it a
 (told), or the memory of earlier episodes in one of the three forms.  While the memory
 is being learned, half of the retries are preceded by a push chosen by a coin, so that
 both ways get tried.
+
+A11 = A10 with a memory of what the arm did to the blocks it was not handling (build_a9
+with `avoid` set; see agents/disturb_memory.py).  The skill knocks blocks that lie near the
+block it picks up or near its path.  Before and after every attempt the agent has the camera
+positions of all blocks, so it can record which blocks were moved and how they lay.  When it
+chooses which block goes where it is shown the candidate placements with their geometry and,
+in the form `avoid` names, what earlier episodes say about it.
 """
 import json
 import math
@@ -131,6 +140,15 @@ SHAPE_FORMAT = """You read robot task instructions.
 Reply with exactly one JSON object and nothing else:
 {"zones": [<each zone pad the instruction says a block has to be put in>], "stacks": <how many stacks of two \
 blocks the instruction asks to build; 0 if it asks for none>}"""
+
+
+NAMED_FORMAT = """You read robot task instructions.
+
+Reply with exactly one JSON object and nothing else:
+{"named": [{"block": "<block name>", "target": "<zone or block it must end up on>"}, ...]}
+List, in the order the instruction gives them, each placement for which the instruction itself says which block \
+it is (by its colour) and where it has to end up. If the instruction leaves the blocks open ("one block", \
+"another block", "a stack of two blocks"), reply {"named": []}. Do not list prohibitions."""
 
 
 CHOOSE_SYSTEM = """You plan block placements for a robot arm on a tabletop. There are coloured blocks and three \
@@ -277,14 +295,21 @@ class Evidence:
         return "\n".join(rows) or "  (no goals could be read from the instruction)"
 
 
-def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None, recover=None):
+def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None, recover=None, avoid=None):
     """Evidence-aware recovery: code keeps per-goal evidence, the model decides.
     `off` names the parts to leave out (see the module text); empty is A9.
     `choice` (none | episodic | lessons | map) turns on A10: the model chooses the
     blocks, with `memory` (a SkillMemory) shown to it in that form.
     `recover` (none | told | episodic | lessons | map) turns on A10r: push as a way to
-    recover from a failed attempt."""
+    recover from a failed attempt.
+    `avoid` (none | told | episodic | lessons | map) turns on A11: A10 whose `memory` is a
+    DisturbMemory, shown in that form."""
     off = frozenset(off)
+    if avoid:
+        from .disturb_memory import DisturbMemory
+        choice = choice or "none"
+        memory = memory if isinstance(memory, DisturbMemory) else DisturbMemory()
+    skill_memory = None if avoid else memory                 # the record of picks and placements (A10, A10r)
     track = bool(choice or recover)                          # keep positions and what last happened to each block
     query = "layout" if track else "scene"
     system_act = system_a10r(recover) if recover else SYSTEM_A9
@@ -293,7 +318,7 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
     names = list(iface.env.object_names)
     zones = ["zone_A", "zone_B", "zone_C"]
     box: Dict[str, Any] = {"ev": Evidence([], off), "refused": 0, "streak": 0, "turns": 0,
-                           "xy": {}, "where": {}, "last": {}, "shape": ([], 0), "plans": [], "pushed": {}}
+                           "xy": {}, "where": {}, "last": {}, "shape": ([], 0), "fixed": [], "plans": [], "pushed": {}}
     goal_schema = {"type": "object", "required": ["goals"], "properties": {"goals": {
         "type": "array", "items": {"type": "object", "required": ["block", "target"], "properties": {
             "block": {"type": "string", "enum": names},
@@ -344,15 +369,30 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
                         + {"failed pick": "; its last pick FAILED", "failed place": "; its last placement FAILED"}
                         .get(box["last"].get(n), ""))
         parts = [f"INSTRUCTION: {instruction}", "LAYOUT:\n" + "\n".join(rows)]
-        note = memory.notes(choice, {n: (*box["xy"][n], box["last"].get(n, "first"))
-                                     for n in names if n in box["xy"]}) if memory is not None else ""
+        note = skill_memory.notes(choice, {n: (*box["xy"][n], box["last"].get(n, "first"))
+                                           for n in names if n in box["xy"]}) if skill_memory is not None else ""
         if note:
             parts.append(note)
         named, stacks = box["shape"]
+        fixed = box["fixed"]
+        if avoid:                                            # A11: the placements there are to choose from
+            kept = {x for i, g in enumerate(ev.goals) if ev.p(i) >= 0.5 for x in g}
+            loose = [n for n in names if n not in kept and n in box["xy"]]
+            cand = [(b, z) for b in loose if ev.picks.get(b, 0) < MAX_PICKS for z in named if z not in kept]
+            if stacks:
+                cand += [(t, b) for t in loose if ev.picks.get(t, 0) < MAX_PICKS for b in loose if b != t]
+            if fixed:                                        # the instruction names them: only the order is open
+                cand = [g for g in fixed if g[0] in loose and ev.picks.get(g[0], 0) < MAX_PICKS]
+            note = memory.notes(avoid, dict(box["xy"]), cand)
+            if note:
+                parts.append(note)
         shape = " and ".join(x for x in [
             f"one placement into each of {', '.join(named)}" if named else "",
             f"{stacks} placement{'s' if stacks > 1 else ''} of a block onto another block" if stacks else ""] if x)
         shape = f"The plan for this instruction has exactly {shape}, and no other placement."
+        if fixed:
+            shape = ("The instruction names its placements, so the plan has exactly these and no other: "
+                     + "; ".join(f"{b} on {t}" for b, t in fixed) + ". List them in the order in which they should be done.")
         if ev.goals:
             parts.append("CURRENT PLAN:\n" + ev.table())
             parts.append(f"{why}. Give the full plan again. {shape} Keep the placements that are SATISFIED. For the "
@@ -375,6 +415,8 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
             into = sorted(t for _, t in goals if t in zones)
             if not goals:
                 return "it has no placement"
+            if fixed and sorted(goals) != sorted(fixed):
+                return "the instruction names its placements: " + "; ".join(f"{b} on {t}" for b, t in fixed)
             if len(set(used)) != len(used):
                 return "a block appears in more than one placement"
             if into != sorted(named):
@@ -409,13 +451,25 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
 
     def parse_node(state: EpisodeState) -> EpisodeState:
         if choice:
-            box["ev"] = Evidence([], off)
+            box["ev"], box["fixed"] = Evidence([], off), []
             out = llm.chat_json([{"role": "system", "content": SHAPE_FORMAT},
                                  {"role": "user", "content": f"INSTRUCTION: {state['instruction']}"}], schema=shape_schema)
             out = out if isinstance(out, dict) else {}
             named = [z for z in zones if z in (out.get("zones") or [])]
             stacks = out.get("stacks") if isinstance(out.get("stacks"), int) else 0
             box["shape"] = (named, stacks if named or stacks else 1)
+            out = llm.chat_json([{"role": "system", "content": NAMED_FORMAT},
+                                 {"role": "user", "content": f"INSTRUCTION: {state['instruction']}"}],
+                                schema={"type": "object", "required": ["named"], "properties": {"named": goal_schema["properties"]["goals"]}})
+            said = state["instruction"].lower()
+            for g in (out or {}).get("named", []) if isinstance(out, dict) else []:
+                pair = (g.get("block"), g.get("target"))     # kept only if the instruction has the block's colour in it
+                if (pair[0] in names and pair[1] in zones + names and pair[0] != pair[1] and pair not in box["fixed"]
+                        and pair[0].split("_")[0] in said and (pair[1] in zones or pair[1].split("_")[0] in said)):
+                    box["fixed"].append(pair)
+            if box["fixed"]:                                 # a stated task: its shape is what it names
+                box["shape"] = ([z for z in zones if z in [t for _, t in box["fixed"]]],
+                                sum(t in names for _, t in box["fixed"]))
             glance()
             choose(state["instruction"])
             iface.plans = box["plans"]                       # kept with the episode's log
@@ -592,6 +646,8 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
                 return {"history": hist + [f"pick({json.dumps(args)}) -> {json.dumps(r)}"], "stop": iface.finished}
             ev.picks[obj] = ev.picks.get(obj, 0) + 1
             was_at = box["xy"].get(obj)
+            before = dict(box["xy"])                         # A11: where the cameras had every block before the attempt
+            box["attempt"] = None
             ev.moved()
             held = None
             if "fingers" in off:                            # ablation: assume the pick worked
@@ -607,7 +663,7 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
                         ev.prior[i], ev.attempted[i], ev.reads[i] = P_WAS_UNMET, True, {}
             note = f"gripper now holds {held}" if held else "gripper is EMPTY, the pick failed"
             if track and obj in names:
-                if memory is not None and was_at:
+                if skill_memory is not None and was_at:
                     rec = {"tool": "pick", "block": obj, "x": round(was_at[0], 1), "y": round(was_at[1], 1),
                            "prev": box["last"].get(obj, "first"), "ok": held == obj}
                     if rec["prev"] == "pushed":
@@ -615,12 +671,17 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
                         rec["why"] = frm.get("why")
                         if frm.get("from"):
                             rec["fx"], rec["fy"] = round(frm["from"][0], 1), round(frm["from"][1], 1)
-                    memory.add(rec)
+                    skill_memory.add(rec)
                 box["from"] = was_at
+                if avoid and held == obj:
+                    box["attempt"] = (obj, before)           # recorded when it has been put down and the cameras were read
                 if held != obj:                              # choose again, knowing where things are now
                     box["last"][obj] = "failed pick"
                     if held is None:
                         glance()
+                        if avoid:
+                            from .disturb_memory import attempt_record
+                            memory.add(attempt_record(before, dict(box["xy"]), obj, None))
                         if choice:
                             choose(state["instruction"], f"The pick of {obj} failed")
             return {"history": hist + [f"pick({obj}) -> executed; {note}"], "stop": iface.finished}
@@ -647,12 +708,16 @@ def build_a9(iface, llm, memory=None, system=None, off=frozenset(), choice=None,
             ev.moved(placed_goal=idx)
             if "stale" not in off or idx is not None:
                 verify(ev, idx if "stale" in off else None)
+            if avoid and box.get("attempt") and box["attempt"][0] == held and not iface.finished:
+                from .disturb_memory import attempt_record
+                memory.add(attempt_record(box["attempt"][1], dict(box["xy"]), held, target))
+            box["attempt"] = None
             if track and held in names:
                 done = idx is not None and ev.p(idx) >= 0.5
-                if memory is not None and box.get("from"):
-                    memory.add({"tool": "place_on", "block": held, "x": round(box["from"][0], 1),
-                                "y": round(box["from"][1], 1), "target": target,
-                                "kind": "zone" if target in zones else "stack", "ok": bool(done)})
+                if skill_memory is not None and box.get("from"):
+                    skill_memory.add({"tool": "place_on", "block": held, "x": round(box["from"][0], 1),
+                                      "y": round(box["from"][1], 1), "target": target,
+                                      "kind": "zone" if target in zones else "stack", "ok": bool(done)})
                 box["last"][held] = "placed" if done else "failed place"
                 if choice and not done and not iface.finished:
                     choose(state["instruction"], f"{held} did not end up on {target}")

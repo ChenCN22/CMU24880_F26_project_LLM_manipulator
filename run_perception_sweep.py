@@ -21,6 +21,8 @@ The run is resumable: rows already in episodes.jsonl are skipped.
 import argparse
 import json
 import os
+import signal
+import sys
 import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List
@@ -48,11 +50,12 @@ ap.add_argument("--p-drop", type=float, default=0.0, help="executor: chance per 
 ap.add_argument("--p-misplace", type=float, default=0.0, help="executor: chance per skill call of a shifted goal")
 ap.add_argument("--policy", default="checkpoints/tqc_her_600000_steps.zip")
 ap.add_argument("--push-policy", default=None, help="push skill checkpoint; without it push drives the pick-and-place skill")
+ap.add_argument("--motion", default=None, help="how the hand moves around the skill: low or clear (default: EXECUTOR_MOTION, else low)")
 ap.add_argument("--calib", default="checkpoints/critic_calib.json")
 ap.add_argument("--model", default="qwen2.5:14b")
 ap.add_argument("--host", default="http://localhost:11434")
 ap.add_argument("--think", default=None, choices=["off", "on"], help="models that can think: off or on (default: not sent)")
-ap.add_argument("--effort", default="none", help="openai:<model>: reasoning effort")
+ap.add_argument("--effort", default="none", help="openai:<model>, anthropic:<model>: reasoning effort (none = no thinking)")
 ap.add_argument("--vlm-model", default="qwen2.5vl:7b", help="perception=vlm: the vision-language model")
 ap.add_argument("--vlm-host", default="http://127.0.0.1:11435")
 ap.add_argument("--vlm-style", default="detect", help="detect (boxes + camera geometry) or scene/cube (direct answers)")
@@ -63,6 +66,8 @@ ap.add_argument("--memory", default=None, help="A10: file of the cross-episode s
 ap.add_argument("--learn", action="store_true", help="A10: add this run's episodes to the memory (else it is frozen)")
 ap.add_argument("--out", default="results/perception")
 a = ap.parse_args()
+# a stop (kill) ends the run between two writes: no half-written row, and the next start continues
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 split = lambda s: [x.strip() for x in s.split(",") if x.strip()]      # noqa: E731
 AGENTS, BASES, PERC, INFO, FAMS = map(split, (a.agents, a.baselines, a.perception, a.info, a.families))
@@ -87,8 +92,20 @@ if AGENTS:
     llm = LLMBackbone(model=a.model, host=a.host, think=None if a.think is None else a.think == "on", effort=a.effort,
                       cache_path=None if a.llm_cache == "off" else (a.llm_cache or os.path.join(a.out, "llm_cache.jsonl")))
     memory = None
+    if any(x.startswith("A11") for x in AGENTS):
+        from agents.disturb_memory import DisturbMemory
+        if any(x.startswith("A10") for x in AGENTS):
+            raise SystemExit("[perception] A10 and A11 keep different memories; run them separately")
+        if not a.learn and any(x.split("-")[1] in ("episodic", "lessons", "map") for x in AGENTS) and \
+                not (a.memory and os.path.exists(a.memory)):
+            raise SystemExit(f"[perception] disturbance memory not found: {a.memory}")
+        memory = DisturbMemory(a.memory, learn=a.learn)
+        print(f"[perception] disturbance memory: {len(memory.records)} attempts, {len(memory.lessons)} lessons, "
+              f"{'learning' if a.learn else 'frozen'}", flush=True)
     if any(x.startswith("A10") for x in AGENTS):
         from agents.skill_memory import SkillMemory
+        if not a.learn and not (a.memory and os.path.exists(a.memory)):
+            raise SystemExit(f"[perception] skill memory not found: {a.memory} (a frozen, empty memory would make every form act like A10-none)")
         memory = SkillMemory(a.memory, learn=a.learn)
         print(f"[perception] skill memory: {len(memory.records)} records, {len(memory.lessons)} lessons, "
               f"{'learning' if a.learn else 'frozen'}", flush=True)
@@ -134,7 +151,8 @@ for agent_name, pmode, info in cells:
             env.reset(seed=seed)
             spec = sample(family, env.object_names, seed)
             ex = FrozenSkillExecutor(env, policy_path=a.policy, max_steps=100, seed=seed,
-                                     p_drop=a.p_drop, p_misplace=a.p_misplace, push_policy_path=a.push_policy)
+                                     p_drop=a.p_drop, p_misplace=a.p_misplace, push_policy_path=a.push_policy,
+                                     motion=a.motion)
             if pmode == "vlm":                           # real images read by a VLM, nothing injected
                 from agent_iface.vlm_perception import VLMPerception
                 perception = VLMPerception(env, spec, seed, model=a.vlm_model, host=a.vlm_host, style=a.vlm_style,
@@ -151,24 +169,26 @@ for agent_name, pmode, info in cells:
                     run_scripted(iface, spec, agent_name)
                 else:
                     llm.reset_usage()
-                    graphs.build(agent_name, iface, llm, memory if agent_name.startswith("A10") else None,
+                    graphs.build(agent_name, iface, llm, memory if agent_name.startswith(("A10", "A11")) else None,
                                  SYSTEM_V2).invoke(
                         {"instruction": spec["instruction"], "history": [], "reflections": [],
                          "memories": [], "steps": 0, "stop": False},
                         {"recursion_limit": a.max_calls * 4 + 20})
                     usage = llm.usage.as_dict()
-                    if agent_name.startswith("A10") and a.learn:
+                    if agent_name.startswith(("A10", "A11")) and a.learn:
                         memory.end_episode(llm)
             except Exception as e:                      # noqa: BLE001
                 err = f"{type(e).__name__}: {e}"
-            for t in iface.transcript:                   # the per-call scene dump is not needed here
-                t.pop("graph", None)
+            for t in iface.transcript:                   # of the per-call scene dump only the true positions are kept
+                g = t.pop("graph", None) or {}
+                t["pos"] = {n: [round(v, 3) for v in p] for n, p in (g.get("positions") or {}).items()}
+                t["held"] = g.get("held")
             row = {"agent": agent_name, "perception": pmode, "info": info, "family": family,
-                   "episode": ep, "seed": seed, "instruction": spec["instruction"],
+                   "episode": ep, "seed": seed, "motion": ex.motion, "instruction": spec["instruction"],
                    **iface.score(), **usage, "wall_seconds": round(time.time() - t0, 2),
                    "error": err, "transcript": iface.transcript,
                    "llm_outputs": [t["out"] for t in llm.trace] if agent_name not in BASES else [],
-                   **({"plans": getattr(iface, "plans", [])} if agent_name.startswith("A10") else {})}
+                   **({"plans": getattr(iface, "plans", [])} if agent_name.startswith(("A10", "A11")) else {})}
             jsonl.write(json.dumps(row, default=str) + "\n")
             jsonl.flush()
             env.close()

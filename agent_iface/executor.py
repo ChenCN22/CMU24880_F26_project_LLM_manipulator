@@ -15,6 +15,8 @@ logger keeps it.  Nothing here is ever shown to the agent directly.
 from typing import Any, Dict, Optional, Tuple
 
 import functools
+import os
+
 import numpy as np
 
 from envs.scene_graph import GRIPPER_CLOSED, scene_graph
@@ -28,6 +30,28 @@ ACTION_GAIN = 0.5         # the skill's xyz action is halved: at full gain it ov
                           # oscillates through the goal (measured on table goals: stays within
                           # 5 cm 74% of the time at gain 1.0, 100% at 0.5)
 ALIGN_TOL = 0.008         # scripted final alignment before release
+CLEARANCE = 0.04          # motion "clear": a carried block passes this far above the highest other block
+GUARD_TOL = 0.012         # motion "clear": the hand goes down to a block only from within this of its centre
+HOLD = -0.05              # motion "clear": finger command while a block is carried.  At full closing
+                          # force (-1) both fingers saturate and the block slides between them, up to
+                          # 2 cm to either side, whenever the hand accelerates; at -0.05 it stays
+                          # within 6 mm of the middle and does not slip out (measured, dev seeds)
+
+# How the hand moves around the learned skill.
+#   "low"    as in every run up to 2026-11-18: the skill approaches and grasps, a pick ends at the
+#            grasp, the skill carries the block to a table-level goal, the hand stays where it
+#            released.  Measured: a quarter of all picks and a third of all placements move a block
+#            they were not about (tests/disturbance_audit.py, tests/motion_audit.py).
+#   "clear"  the skill still approaches and grasps.  Around it, scripted:
+#              - the hand does not go down to a block before it is above it (it is held at a
+#                height that clears the blocks around and centred), and keeps still while the
+#                fingers close;
+#              - a grasped block is lifted straight up, carried above every other block, centred
+#                over its target, lowered straight down, released, and the open hand leaves
+#                straight up.
+#            Letting the skill carry the lifted block was tried and does not work: handed a block
+#            that is already in the air it opens the fingers and starts over from the table.
+MOTION = os.environ.get("EXECUTOR_MOTION", "low")
 
 # A pick cannot be compiled as "goal = where the block already is": the skill is
 # a HER goal-conditioned policy, so achieved_goal == desired_goal reads as an
@@ -93,8 +117,14 @@ class FrozenSkillExecutor:
         stack_standoff: float = 0.08,
         align: bool = True,
         push_policy_path: Optional[str] = None,
+        motion: Optional[str] = None,
     ) -> None:
         self.env = env
+        self.motion = motion or MOTION
+        if self.motion not in ("low", "clear"):
+            raise ValueError(f"unknown motion {self.motion!r}: low or clear")
+        self.clear = self.motion == "clear"
+        self.phase = ""              # which part of a call is running; read by tests/motion_audit.py only
         # A second frozen skill, trained on single-object PandaPush: it slides a block over the
         # table with the fingers closed.  None keeps the executor as it was (push() below then
         # still drives the pick-and-place policy).
@@ -169,7 +199,7 @@ class FrozenSkillExecutor:
 
     # -------------------------------------------------------------- skill call
     def _run(self, obj: str, goal: np.ndarray, claim_fn, max_steps: Optional[int] = None,
-             gain: float = 1.0) -> Tuple[bool, Dict[str, Any]]:
+             gain: float = 1.0, guard: float = 0.0) -> Tuple[bool, Dict[str, Any]]:
         """Drive the skill toward `goal` with `obj` as its single object.
 
         `claim_fn()` is the executor's own notion of having finished -- built
@@ -195,6 +225,15 @@ class FrozenSkillExecutor:
             action = np.asarray(action, dtype=np.float32).copy()
             if not self.scripted:
                 action[:3] *= gain
+            if guard:
+                ee = np.asarray(self.env.robot.get_ee_position(), dtype=float)
+                to = np.asarray(self.env.sim.get_base_position(obj), dtype=float)[:2] - ee[:2]
+                if np.abs(to).max() > GUARD_TOL and ee[2] < guard + 0.01:
+                    # not above the block yet: no descent below `guard`, and centre over the block
+                    action[2] = max(float(action[2]), 0.3 if ee[2] < guard - 0.01 else 0.0)
+                    action[:2] = np.clip(to / 0.05, -1.0, 1.0) * 0.6
+                if action[3] < 0 and 0.02 < self.env.robot.get_fingers_width() < 0.05:
+                    action[:3] = 0.0                         # fingers closing on a block: the hand keeps still
             self.env.robot.set_action(action)
             self.env.sim.step()
 
@@ -227,6 +266,7 @@ class FrozenSkillExecutor:
         translate.  Not a skill call and makes no claim.  grip=-1 closes the fingers
         on arrival, which is how the push skill starts."""
         robot, sim = self.env.robot, self.env.sim
+        self.phase = "home"
         for _ in range(3):
             robot.set_action(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)); sim.step()
         # a slightly different start each time, so that retrying a failed call
@@ -244,6 +284,52 @@ class FrozenSkillExecutor:
             robot.set_action(np.array([d[0], d[1], d[2], 1.0], dtype=np.float32)); sim.step()
         for _ in range(6 if grip < 0 else 0):               # close only once the hand is up and away
             robot.set_action(np.array([0.0, 0.0, 0.0, grip], dtype=np.float32)); sim.step()
+
+    def _move(self, target, grip: float, max_steps: int = 40, tol: float = 0.01, speed: float = 0.5,
+              settle: int = 0) -> None:
+        """Scripted straight move of the hand to `target`, fingers held open (1) or closed (-1),
+        then `settle` steps at rest."""
+        robot, sim = self.env.robot, self.env.sim
+        target = np.asarray(target, dtype=float)
+        for _ in range(max_steps):
+            ee = np.asarray(robot.get_ee_position(), dtype=float)
+            if np.linalg.norm(ee - target) < tol:
+                break
+            d = np.clip((target - ee) / 0.05, -1.0, 1.0) * speed
+            robot.set_action(np.array([d[0], d[1], d[2], grip], dtype=np.float32)); sim.step()
+        for _ in range(settle):
+            robot.set_action(np.array([0.0, 0.0, 0.0, grip], dtype=np.float32)); sim.step()
+
+    def _lower(self, obj: str, goal: np.ndarray) -> None:
+        """Scripted final approach of "clear": centre the BLOCK (not the hand) over the target at
+        carry height, then go straight down until the block is just above its support.
+
+        A block pinched between the fingers slides along them whenever the hand accelerates, so
+        the offset between block and hand is only read with the hand at rest, and the descent
+        makes no sideways correction."""
+        robot, sim = self.env.robot, self.env.sim
+        rest = lambda n: [(robot.set_action(np.array([0.0, 0.0, 0.0, HOLD], dtype=np.float32)), sim.step())   # noqa: E731
+                          for _ in range(n)]
+
+        def offset() -> np.ndarray:
+            off = np.asarray(sim.get_base_position(obj), dtype=float) - np.asarray(robot.get_ee_position(), dtype=float)
+            return off if np.linalg.norm(off) <= 0.05 else np.zeros(3)   # not in the hand: move the hand as before
+
+        rest(4)
+        for _ in range(3):                                           # centre, at most three corrections
+            ee, off = np.asarray(robot.get_ee_position(), dtype=float), offset()
+            if np.linalg.norm(ee[:2] + off[:2] - goal[:2]) < 0.004:
+                break
+            self._move([goal[0] - off[0], goal[1] - off[1], ee[2]], grip=HOLD, max_steps=15, tol=0.002, speed=0.25, settle=4)
+        ee, off = np.asarray(robot.get_ee_position(), dtype=float), offset()
+        down = max(goal[2] + 0.002 - off[2], goal[2] - 0.008)       # the fingertips reach below the block
+        self._move([ee[0], ee[1], down], grip=HOLD, max_steps=40, tol=0.003, speed=0.3, settle=3)
+
+    def _carry_height(self, obj: str) -> float:
+        """Height of the hand at which a carried block clears every other block."""
+        sim = self.env.sim
+        tops = [float(sim.get_base_position(n)[2]) + OBJECT_SIZE / 2 for n in self.env.object_names if n != obj]
+        return float(np.clip(max(tops + [OBJECT_SIZE]) + OBJECT_SIZE / 2 + CLEARANCE, 0.10, 0.20))
 
     def _align(self, goal: np.ndarray, max_steps: int = 30) -> None:
         """Scripted final approach: with the fingers left closed, centre the
@@ -305,8 +391,20 @@ class FrozenSkillExecutor:
             self._go_home()
         here = np.asarray(self.env.sim.get_base_position(obj), dtype=np.float32)
         goal = here + np.array([0.0, 0.0, PICK_LIFT], dtype=np.float32)
+        guard = 0.0
+        if self.clear:                                       # above the block and above any block close to it
+            near = [float(self.env.sim.get_base_position(n)[2]) for n in self.env.object_names
+                    if np.linalg.norm(np.asarray(self.env.sim.get_base_position(n), dtype=float)[:2] - here[:2]) < 0.10]
+            guard = max(near) + OBJECT_SIZE / 2 + 0.035
+        self.phase = "grasp"
         claimed, info = self._run(obj, goal, self._closed_on_something(self.pick_hold),
-                                  max_steps=self.max_steps // 2, gain=self.pick_gain)
+                                  max_steps=int(self.max_steps * 0.8) if self.clear else self.max_steps // 2,
+                                  gain=self.pick_gain, guard=guard)
+        if self.clear and claimed:                           # straight up, above everything else on the table
+            self.phase = "lift"
+            ee = np.asarray(self.env.robot.get_ee_position(), dtype=float)
+            self._move([ee[0], ee[1], self._carry_height(obj)], grip=HOLD, settle=3)
+        self.phase = ""
         truth = scene_graph(self.env)["held"] == obj
         return {"ok": True, "claimed_success": claimed, "_truth": bool(truth), "_info": info}
 
@@ -321,7 +419,15 @@ class FrozenSkillExecutor:
             return {"ok": False, "error": f"unknown target {target!r}; args need \"target\", a zone "
                                           f"{list(ZONES)} or a block {list(self.env.object_names)}"}
         approach = goal
-        if target in self.env.object_names and self.stack_standoff and not self.scripted:
+        if self.clear and not self.scripted:
+            # Scripted: to a point straight above the target, at a height that clears every other block.
+            z = self._carry_height(obj)
+            ee = np.asarray(self.env.robot.get_ee_position(), dtype=float)
+            if ee[2] < z - 0.02:
+                self.phase = "lift"
+                self._move([ee[0], ee[1], z], grip=HOLD, settle=3)
+            approach = np.array([goal[0], goal[1], z], dtype=np.float32)
+        elif target in self.env.object_names and self.stack_standoff and not self.scripted:
             # Driving the skill straight at a stack target shoves the block
             # underneath (it arrives low and from the side).  Send it to a
             # table-level staging point short of the target instead; the
@@ -332,12 +438,26 @@ class FrozenSkillExecutor:
             away = away / n if n > 1e-6 else np.array([-1.0, 0.0])
             xy = np.clip(goal[:2] + away * self.stack_standoff, -0.15, 0.15)
             approach = np.array([xy[0], xy[1], OBJECT_SIZE / 2], dtype=np.float32)
-        claimed, info = self._run(obj, approach, self._ee_at(approach), gain=self.gain)
-        if claimed and self.align and not self.scripted:
-            self._align(goal)
+        self.phase = "carry"
+        if self.clear and not self.scripted:
+            self._move(approach, grip=HOLD, max_steps=80)
+            claimed, info = self._ee_at(approach)(), {"steps": 0, "q_trace": []}
+            self.phase = "align"                # centre the block at carry height, then straight down
+            self._lower(obj, goal)
+        else:
+            claimed, info = self._run(obj, approach, self._ee_at(approach), gain=self.gain)
+            if claimed and self.align and not self.scripted:
+                self.phase = "align"
+                self._align(goal)
+        self.phase = "release"
         for _ in range(8):                      # release and let physics settle
             self.env.robot.set_action(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32))
             self.env.sim.step()
+        if self.clear and not self.scripted:    # the open hand leaves straight up
+            self.phase = "retreat"
+            ee = np.asarray(self.env.robot.get_ee_position(), dtype=float)
+            self._move([ee[0], ee[1], max(ee[2], self._carry_height(obj))], grip=1.0)
+        self.phase = ""
         op = np.asarray(self.env.sim.get_base_position(obj), dtype=float)
         info["obj_goal_dist_after_release"] = round(float(np.linalg.norm(op[:2] - goal[:2])), 4)
         # Ground truth has to match what the target meant.  For a zone, landing
@@ -398,6 +518,7 @@ class FrozenSkillExecutor:
             self._go_home(grip=-1.0)
         goal = np.array([float(xy[0]), float(xy[1]), OBJECT_SIZE / 2], dtype=np.float32)
         start = np.asarray(sim.get_base_position(obj), dtype=float)
+        self.phase = "push"
         for _ in range(steps):
             pos = np.asarray(sim.get_base_position(obj), dtype=np.float32)
             obs = {"observation": np.concatenate([
@@ -408,6 +529,7 @@ class FrozenSkillExecutor:
             robot.set_action(np.array([action[0], action[1], action[2], -1.0], dtype=np.float32)); sim.step()
         for _ in range(8):                                   # straight up, off the block
             robot.set_action(np.array([0.0, 0.0, 1.0, -1.0], dtype=np.float32)); sim.step()
+        self.phase = ""
         now = np.asarray(sim.get_base_position(obj), dtype=float)
         info = {"moved": round(float(np.linalg.norm(now[:2] - start[:2])), 4),
                 "obj_goal_dist": round(float(np.linalg.norm(now[:2] - goal[:2])), 4)}

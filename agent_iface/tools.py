@@ -1,15 +1,19 @@
-"""The six-tool interface.  Frozen across every experimental condition.
+"""The six-tool interface, the same for every agent and every condition.
 
-This layer is the contract of the whole study: A1-A4 differ only in control
-flow and in what enters the context window, never in what they can do.  Two
-properties are enforced here rather than trusted to the agents:
+Agents differ in control flow and in what enters the prompt, never in what they can do.
+Enforced here rather than trusted to the agents:
 
-  1. The agent sees `claimed_success` and nothing else.  Every `_`-prefixed
-     field from the executor -- ground truth, step counts, forced drops -- is
-     stripped before the result is returned, and kept in the transcript.
-  2. Perception is metered.  `observe` and `check_constraints` draw on a fixed
-     per-episode budget.  An agent that verifies after every action cannot win
-     on cost; one that never verifies cannot win on reliability.
+  1. An agent sees only what a tool returns.  Every `_`-prefixed field from the executor
+     (ground truth, step counts, forced drops) is stripped before the result is returned
+     and kept in the transcript.
+  2. With hide_claims (every run of the camera study) an action returns only that the
+     motion was executed.  The cameras are then the only way to learn its outcome.
+  3. An episode ends at done() or after max_calls tool calls.  observe_budget can meter
+     looking separately (the first study, run_sweep.py); the camera study runs with
+     observe_budget=None.
+
+The descriptions in TOOL_SCHEMAS are documentation.  The agents' prompts spell the tools
+out themselves (SYSTEM_V2 in agents/nodes.py, SYSTEM_A9 in agents/evidence.py).
 """
 import json
 from typing import Any, Dict, List, Optional
@@ -27,14 +31,15 @@ RELIABILITY_LABEL = ("camera reports are sometimes wrong. Reports of the same th
 TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "pick",
-        "description": "Close the gripper on an object. Returns only the executor's claimed outcome.",
+        "description": "Close the gripper on an object. Returns that the motion was executed (and, without hide_claims, "
+                       "the executor's claimed outcome).",
         "parameters": {"type": "object", "properties": {
             "obj": {"type": "string", "description": "e.g. 'red_block'"}}, "required": ["obj"]},
     },
     {
         "name": "place_on",
         "description": "Place the held object on a zone pad or on top of another block. "
-                       "Returns only the executor's claimed outcome.",
+                       "Returns as pick does.",
         "parameters": {"type": "object", "properties": {
             "target": {"type": "string", "description": "'zone_A'|'zone_B'|'zone_C' or a block name"}},
             "required": ["target"]},
@@ -42,7 +47,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "push",
         "description": "Slide an object over the table, along an axis or toward the middle of the "
-                       "workspace ('center'). Returns only the claimed outcome.",
+                       "workspace ('center'). Returns as pick does.",
         "parameters": {"type": "object", "properties": {
             "obj": {"type": "string"},
             "direction": {"type": "string", "enum": ["+x", "-x", "+y", "-y", "center"]},
@@ -51,14 +56,14 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "observe",
-        "description": "Spend one unit of perception budget to read part of the scene. "
+        "description": "Ask one camera (view: front, top or side) about part of the scene. "
                        "Queries: 'scene', 'zones', 'stacks', 'held', 'where:<obj>'.",
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string"}}, "required": ["query"]},
     },
     {
         "name": "check_constraints",
-        "description": "Spend one unit of perception budget to list currently violated constraints.",
+        "description": "Ask one camera which constraints it sees violated.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -69,6 +74,10 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
 ]
 
 TOOL_NAMES = [t["name"] for t in TOOL_SCHEMAS]
+# Every argument a tool call can carry, for back ends whose schemas cannot leave "args" open.
+ARG_PROPERTIES: Dict[str, Any] = {k: {x: y for x, y in v.items() if x != "description"}
+                                  for t in TOOL_SCHEMAS for k, v in t["parameters"]["properties"].items()}
+ARG_PROPERTIES["view"] = {"type": "string"}            # observe: the camera to ask
 
 
 class BudgetExhausted(Exception):

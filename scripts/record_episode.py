@@ -39,6 +39,7 @@ ap.add_argument("--seed", type=int, default=6400)
 ap.add_argument("--perception", default="none")
 ap.add_argument("--policy", default="checkpoints/tqc_her_600000_steps.zip")
 ap.add_argument("--push-policy", default="checkpoints/tqc_her_push_350000_steps.zip")
+ap.add_argument("--motion", default=None, help="how the hand moves around the skill: low or clear")
 ap.add_argument("--calib", default="checkpoints/critic_calib.json")
 ap.add_argument("--model", default="qwen2.5:14b")
 ap.add_argument("--host", default="http://localhost:11434")
@@ -64,7 +65,7 @@ env.reset(seed=a.seed)
 spec = sample(a.family, env.object_names, a.seed)
 goals = [g for g in spec["goals"] if g["type"] in ("in_zone", "on_top_of")]
 pair = lambda g: (g["obj"], g["zone"]) if g["type"] == "in_zone" else (g["top"], g["bottom"])   # noqa: E731
-ex = FrozenSkillExecutor(env, policy_path=a.policy, max_steps=100, seed=a.seed, push_policy_path=a.push_policy)
+ex = FrozenSkillExecutor(env, policy_path=a.policy, max_steps=100, seed=a.seed, push_policy_path=a.push_policy, motion=a.motion)
 calib = load_calib(a.calib) if os.path.exists(a.calib) else None
 iface = ToolInterface(env, ex, spec, observe_budget=None, max_calls=a.max_calls, hide_claims=True, critic_calib=calib,
                       perception=PerceptionModel(spec, a.seed, a.perception, 0.30, 0.10, bad=(0.90, 0.30), good=(0.05, 0.02)))

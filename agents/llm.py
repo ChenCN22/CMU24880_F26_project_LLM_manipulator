@@ -42,6 +42,24 @@ class Usage:
         }
 
 
+def _claude_schema(s: Any) -> Any:
+    """The schema as Claude's structured output takes it: every object closed, no numeric or length limits.
+    An object the schema leaves open (the "args" of a tool call) gets every tool argument as an optional field."""
+    if isinstance(s, list):
+        return [_claude_schema(x) for x in s]
+    if not isinstance(s, dict):
+        return s
+    drop = ("minimum", "maximum", "multipleOf", "minLength", "maxLength", "minItems", "maxItems", "pattern")
+    out = {k: ({n: _claude_schema(v2) for n, v2 in v.items()} if k == "properties" else _claude_schema(v))
+           for k, v in s.items() if k not in drop}
+    if out.get("type") == "object":
+        if "properties" not in out:
+            from agent_iface.tools import ARG_PROPERTIES
+            out["properties"] = dict(ARG_PROPERTIES)
+        out["additionalProperties"] = False
+    return out
+
+
 @dataclass
 class LLMBackbone:
     model: str = DEFAULT_MODEL
@@ -64,7 +82,8 @@ class LLMBackbone:
     # model answers within the same num_predict; None leaves the request as it always was.
     think: Optional[bool] = None
     last_error: str = ""
-    # A model named "openai:<id>" is asked through the OpenAI API (key in OPENAI_API_KEY);
+    # A model named "openai:<id>" is asked through the OpenAI API (key in OPENAI_API_KEY), one named
+    # "anthropic:<id>" through the Claude API (key in ANTHROPIC_API_KEY or CLAUDE_API_KEY);
     # `effort` is its reasoning effort, "none" being the counterpart of think=False.
     effort: str = "none"
 
@@ -114,6 +133,51 @@ class LLMBackbone:
                 "prompt_eval_count": use.get("prompt_tokens", 0), "eval_count": use.get("completion_tokens", 0),
                 "cached_tokens": (use.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}
 
+    def _anthropic(self, messages: List[Dict[str, str]], schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """One call to the Claude Messages API, returned in the shape of an Ollama reply.
+
+        The API takes no temperature and no seed.  effort "none" asks for an answer without thinking
+        (Haiku: thinking disabled, Sonnet: between_tools); any other effort is passed on with adaptive
+        thinking, and the answer then gets room for the thinking on top of num_predict."""
+        name = self.model.split(":", 1)[1]
+        system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+        body: Dict[str, Any] = {"model": name, "max_tokens": self.num_predict,
+                                "messages": [m for m in messages if m["role"] != "system"]}
+        if system:
+            body["system"] = system
+        if self.effort in ("", "none"):
+            if "haiku" in name:
+                body["thinking"] = {"type": "disabled"}
+            elif "sonnet" in name:
+                body["thinking"] = {"type": "between_tools"}
+            else:
+                raise urllib.error.URLError(f"{name} cannot answer without thinking: give an effort (low, medium, ...)")
+        else:
+            body["thinking"] = {"type": "adaptive"}
+            body["output_config"] = {"effort": self.effort}
+            body["max_tokens"] = self.num_predict + 4096
+        if schema:
+            body.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": _claude_schema(schema)}
+        key = os.environ.get("ANTHROPIC_API_KEY") or os.environ["CLAUDE_API_KEY"]
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2026-10-21"})
+        for wait in (2, 8, 30, 60, None):                   # rate limits, overload and server errors are retried
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    out = json.load(r)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code not in (408, 429, 500, 502, 503, 504, 529) or wait is None:
+                    raise urllib.error.URLError(f"Claude {e.code}: {e.read()[:300]!r}")
+                time.sleep(wait)
+        use = out.get("usage") or {}
+        read, written = use.get("cache_read_input_tokens") or 0, use.get("cache_creation_input_tokens") or 0
+        text = "".join(b.get("text", "") for b in out.get("content") or [] if b.get("type") == "text")
+        return {"message": {"content": text if out.get("stop_reason") != "refusal" else ""},
+                "prompt_eval_count": (use.get("input_tokens") or 0) + read + written,
+                "eval_count": use.get("output_tokens") or 0, "cached_tokens": read}
+
     def chat_json(self, messages: List[Dict[str, str]],
                   retries: int = 2, schema: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """One constrained-decoding call.  Returns a parsed object, or None if
@@ -135,7 +199,7 @@ class LLMBackbone:
         }
         if self.think is not None:
             body["think"] = self.think
-        remote = self.model.startswith("openai:")
+        remote = self.model.startswith(("openai:", "anthropic:"))
         key = None
         if self.cache_path:
             ident = [self.model, self.temperature, self.seed, self.num_ctx, self.num_predict, schema, messages]
@@ -159,7 +223,10 @@ class LLMBackbone:
             body["messages"] = attempt_msgs
             t0 = time.time()
             try:
-                r = self._openai(attempt_msgs, schema) if remote else self._post("/api/chat", body)
+                if self.model.startswith("anthropic:"):
+                    r = self._anthropic(attempt_msgs, schema)
+                else:
+                    r = self._openai(attempt_msgs, schema) if remote else self._post("/api/chat", body)
             except (urllib.error.URLError, TimeoutError) as e:
                 self.last_error = str(e)
                 self.usage.calls += 1

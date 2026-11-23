@@ -140,6 +140,9 @@ for _form in ("none", "episodic", "lessons", "map"):
 # A10r: A9 with the push skill as a way to recover; the form is what the model is shown to decide when to push
 for _form in ("none", "told", "episodic", "lessons", "map"):
     BUILDERS[f"A10r-{_form}"] = functools.partial(build_a9, recover=_form)
+# A11: A10 with a memory of which blocks the arm knocked while it handled another one
+for _form in ("none", "told", "episodic", "lessons", "map"):
+    BUILDERS[f"A11-{_form}"] = functools.partial(build_a9, choice="none", avoid=_form)
 A9_PARTS = ("single", "prior", "stale", "doubt", "fingers", "guards")
 for _part in A9_PARTS:                                    # A9 with exactly one part removed
     BUILDERS[f"A9-{_part}"] = functools.partial(build_a9, off=frozenset({_part}))
